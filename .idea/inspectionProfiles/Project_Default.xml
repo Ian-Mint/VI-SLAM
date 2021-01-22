@@ -1,0 +1,71 @@
+<component name="InspectionProjectProfileManager">
+  <profile version="1.0">
+    <option name="myName" value="Project Default" />
+    <inspection_tool class="PyPackageRequirementsInspection" enabled="true" level="WARNING" enabled_by_default="true">
+      <option name="ignoredPackages">
+        <value>
+          <list size="2">
+            <item index="0" class="java.lang.String" itemvalue="peppercorn" />
+            <item index="1" class="java.lang.String" itemvalue="simpleaudio" />
+          </list>
+        </value>
+      </option>
+    </inspection_tool>
+    <inspection_tool class="PyPep8Inspection" enabled="true" level="WEAK WARNING" enabled_by_default="true">
+      <option name="ignoredErrors">
+        <list>
+          <option value="W605" />
+          <option value="E402" />
+        </list>
+      </option>
+    </inspection_tool>
+    <inspection_tool class="PyPep8NamingInspection" enabled="true" level="WEAK WARNING" enabled_by_default="true">
+      <option name="ignoredErrors">
+        <list>
+          <option value="N812" />
+        </list>
+      </option>
+    </inspection_tool>
+    <inspection_tool class="PyUnresolvedReferencesInspection" enabled="true" level="WARNING" enabled_by_default="true">
+      <option name="ignoredIdentifiers">
+        <list>
+          <option value="underwater_rl.main.memory" />
+          <option value="underwater_rl.main.models" />
+          <option value="underwater_rl.main.wrappers" />
+          <option value="utils.dashboard.dashboard.data_loader" />
+          <option value="utils.dashboard.dashboard.__init__" />
+          <option value="utils.dashboard.dashboard.data_loader.__init__" />
+          <option value="utils.dashboard.dashboard.dashboard.__init__" />
+          <option value="utils.dashboard.dashboard.dashboard.data_loader" />
+          <option value="argparse._StoreAction" />
+          <option value="utils.convert_images_to_video" />
+          <option value="utils.distr_projection" />
+          <option value="utils.get_args_status_string" />
+          <option value="main" />
+          <option value="memory" />
+          <option value="models" />
+          <option value="load_params_event" />
+          <option value="utils.get_logger" />
+          <option value="utils.get_logger_from_process" />
+          <option value="underwater_rl.main.base" />
+          <option value="underwater_rl.main.learner" />
+          <option value="underwater_rl.main.utils" />
+          <option value="underwater_rl.main.replay" />
+          <option value="underwater_rl.replay.utils" />
+          <option value="underwater_rl.actor.base" />
+          <option value="underwater_rl.actor.utils" />
+          <option value="underwater_rl.actor.wrappers" />
+          <option value="underwater_rl.learner.base" />
+          <option value="underwater_rl.learner.utils" />
+          <option value="underwater_rl.main.actor" />
+          <option value="underwater_rl.test.time_workers.replay" />
+          <option value="underwater_rl.test.time_workers.base" />
+          <option value="underwater_rl.test.time_replay.replay" />
+          <option value="underwater_rl.test.time_replay.base" />
+          <option value="underwater_rl.common._write" />
+          <option value="multiprocessing.managers.DictProxy" />
+        </list>
+      </option>
+    </inspection_tool>
+  </profile>
+</component>
