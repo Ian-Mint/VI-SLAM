@@ -1,14 +1,12 @@
 from abc import ABC, abstractmethod
-from collections import namedtuple
 from typing import Tuple, List
 
-import numpy as np
 import matplotlib.pyplot as plt
-
-from collections import defaultdict
+import numpy as np
 
 VALIDATION = 'validation'
 TRAIN = 'train'
+STOP_TRAINING = True
 
 
 def rotate(x: list, n: int):
@@ -36,6 +34,14 @@ def sigmoid(x: np.ndarray) -> np.ndarray:
         numpy vector
     """
     return 1 / (1 + np.exp(-x))
+
+
+def softmax(x):
+    x_exp = np.exp(x)
+    sum_x_exp = np.sum(x_exp, axis=0)
+    y = x_exp / sum_x_exp
+    assert np.all(np.sum(y, axis=0), 1)
+    return y
 
 
 class Regression(ABC):
@@ -69,6 +75,7 @@ class Regression(ABC):
         self.overall_val_accuracy: np.ndarray = np.zeros((self.n_splits, self.epochs))
 
         self.min_val_loss = np.inf
+        self.min_epoch = 0
 
     @staticmethod
     def _validate_labels(label_splits) -> int:
@@ -82,7 +89,6 @@ class Regression(ABC):
         assert tuple(range(n_unique)) == tuple(unique)
         assert np.min(unique) == 0
         return n_unique
-
 
     def _init_weights(self) -> List[np.ndarray]:
         """
@@ -155,13 +161,14 @@ class Regression(ABC):
     def cv_train(self):
         """
         Train using cross-validation
-
-        Returns:
-            None
         """
         for e in range(self.epochs):
+            stop_training = True
             for split_number in range(self.n_splits):
-                self.optimize(split_number, e)
+                stop_training &= self.optimize(split_number, e)
+            # stop training if we get a stop_training signal from all splits
+            if stop_training:
+                return
 
     @abstractmethod
     def optimize(self, split_number: int, epoch: int) -> None:
@@ -407,51 +414,23 @@ class SoftMaxRegression(Regression):
 
     def __init__(self, data_splits: List[np.ndarray], label_splits: List[np.ndarray], learning_rate=1e-5, epochs=300):
         super(SoftMaxRegression).__init__(self, data_splits, label_splits, learning_rate, epochs)
-        self.softmax_weight_splits = self._init_weights()
-        self.softmax_best_weight_splits: List[np.ndarray] = [np.zeros(self.n_classes, self.data_dim) for
-                                                             _ in range(self.n_splits)]
-        self.softmax_best_loss_splits: List[float] = [-np.inf] * self.n_splits
+        self.weights = self._init_weights()
+        self.best_weights: List[np.ndarray] = [np.zeros(self.n_classes, self.data_dim) for
+                                               _ in range(self.n_splits)]
+        self.min_loss: List[float] = [-np.inf] * self.n_splits
 
-        self.one_hot_enc_dict = defaultdict(np.ndarray)
-        self.init_one_hot_encoding()
-
-    def init_one_hot_encoding(self):
+    def _encode_one_hot(self, labels: np.ndarray) -> np.ndarray:
         """
-        Creates the one hot encodings dictionary based on the label dictionary.
-        Sets the class variable of the one hot encoding for future use
+        The label vector to encode
 
         Returns:
-            None
+            (n x n_classes) numpy array
         """
-        index = 0
-        for key in self.label_dict:
-            self.label_to_index_dict[key] = index
-            self.index_to_label_dict[index] = key
-            array = np.zeros((1, self.number_of_classes))
-            array[0][index] = 1
-            self.one_hot_enc_dict[key] = np.copy(array)
-            index += 1
-
-    def generate_one_hot_encoding(self, label: np.ndarray) -> np.ndarray:
-        """
-        Creates the one hot encodings for the labels provided
-
-        Args:
-            label: The labels for the dataset at hand (training, validation, holdout)
-
-        Returns:
-            one_hot_enc: The labels transformed into the one hot encodings
-
-        """
-        one_hot_enc = None
-        for index in range(len(label)):
-            specific_encoding = self.one_hot_enc_dict[label[index]]  # get one hot encoding for label value
-            if one_hot_enc is None:
-                one_hot_enc = specific_encoding
-            else:
-                one_hot_enc = np.concatenate((one_hot_enc, specific_encoding), axis=0)
-
-        return one_hot_enc
+        one_hot = np.zeros((len(labels), self.n_classes), dtype=int)
+        one_hot[np.arange(labels.size), labels] = 1
+        assert (len(labels), self.n_classes) == one_hot.shape
+        assert np.all(one_hot.sum(axis=1) == 1)
+        return one_hot
 
     def optimize(self, split_number: int, epoch: int):
         """
@@ -465,33 +444,25 @@ class SoftMaxRegression(Regression):
             None
 
         """
-        # Get the training and validation data
-        train_data = self.train_splits[split_number]
-        train_label = self.get_label_split(split_number, "train")
-        val_data = self.val_splits[split_number]
-        val_label = self.get_label_split(split_number, "validation")
+        train_data = self.get_data_split(split_number, TRAIN)
+        train_label = self.get_label_split(split_number, TRAIN)
+        val_data = self.get_data_split(split_number, VALIDATION)
+        val_label = self.get_label_split(split_number, VALIDATION)
 
         # Get the weights
-        weights = self.softmax_weight_splits[split_number]
+        weights = self.weights[split_number]
 
         # convert the labels into one hot encodings
-        one_hot_enc_train_label = self.generate_one_hot_encoding(train_label)
-        one_hot_enc_val_label = self.generate_one_hot_encoding(val_label)
-        # calculate the new weights based on training data
-        if self.gradient_descent == "batch":
-            new_weights = weights + self.lr * self._grad(weights, train_data, one_hot_enc_train_label)
-        elif self.gradient_descent == "weighted":
-            new_weights = weights + self.lr * self._grad_weighted(weights, train_data, one_hot_enc_train_label)
-        elif self.gradient_descent == "stochastic":
-            new_weights = np.copy(self._stochastic_grad(weights, train_data, one_hot_enc_train_label, self.lr))
-        else:
-            raise Exception("ERROR: Gradient Descent Input Not Recognized")
-        # update the weights
-        self.softmax_weight_splits[split_number] = new_weights
+        one_hot_enc_train_label = self._encode_one_hot(train_label)
+        one_hot_enc_val_label = self._encode_one_hot(val_label)
+
+        # weight update
+        grad = self._grad(weights, train_data, one_hot_enc_train_label)
+        weights[:, :] = weights + self.lr * grad
 
         # calculate the training/validation loss and accuracy
-        train_loss, train_accuracy = self.loss_and_accuracy(new_weights, train_data, one_hot_enc_train_label)
-        val_loss, val_accuracy = self.loss_and_accuracy(new_weights, val_data, one_hot_enc_val_label)
+        train_loss, train_accuracy = self.loss_and_accuracy(weights, train_data, one_hot_enc_train_label)
+        val_loss, val_accuracy = self.loss_and_accuracy(weights, val_data, one_hot_enc_val_label)
 
         # record training, val loss and accuracy
         self.overall_train_loss[split_number][epoch] = train_loss
@@ -499,65 +470,15 @@ class SoftMaxRegression(Regression):
         self.overall_train_accuracy[split_number][epoch] = train_accuracy
         self.overall_val_accuracy[split_number][epoch] = val_accuracy
 
-        # early-stopping implementation
-        if self.softmax_best_loss_splits[split_number] == -1:
-            self.softmax_best_loss_splits[split_number] = val_loss
-            self.softmax_best_weight_splits[split_number] = new_weights
-        elif val_loss < self.softmax_best_loss_splits[split_number]:
-            self.softmax_best_loss_splits[split_number] = val_loss
-            self.softmax_best_weight_splits[split_number] = new_weights
+        if val_loss < self.min_loss[split_number]:
+            self.min_loss[split_number] = val_loss
+            self.best_weights[split_number][:, :] = weights
+            self.min_epoch = epoch
 
-    def test_set_accuracy_and_loss(self) -> Tuple[int, int, pd.core.frame.DataFrame]:
-        """
-        Get the test set accuracy and loss based on the best models for each split
-
-        Returns:
-            (avg_loss, avg_accuracy, confusion_matrix_df): The average loss and accuracy of the best models on the test
-            set. Also includes the confusion matrix of the test set
-        """
-        # use the best model for each split to record accuracy and loss on test set and also create confusion matrix
-        confusion_matrix = np.zeros((self.number_of_classes, self.number_of_classes), int)
-        number_of_training = 0
-        number_right_total = 0
-        for split_number in range(self.n_splits):
-            softmax_best_model_weights = self.softmax_best_weight_splits[split_number]
-
-            # get the data and the labels
-            holdout_data = self.holdout_splits[split_number]
-            holdout_label = self.get_label_split(split_number, "holdout")
-            number_of_training += len(holdout_label)
-            # convert the labels into one hot encodings
-            one_hot_enc_holdout_label = self.generate_one_hot_encoding(holdout_label)
-
-            test_loss, test_accuracy = self.loss_and_accuracy(softmax_best_model_weights, holdout_data,
-                                                              one_hot_enc_holdout_label)
-            confusion_matrix_split = self.gen_confusion_matrix(softmax_best_model_weights, holdout_data, holdout_label)
-            number_right_total += test_accuracy * len(holdout_data)
-
-            self.test_loss[split_number] = test_loss
-            self.test_accuracy[split_number] = test_accuracy
-            confusion_matrix = confusion_matrix + confusion_matrix_split
-
-        # average test loss and accuracy from above
-        avg_loss = np.average(self.test_loss)
-        avg_accuracy = np.average(self.test_accuracy)
-
-        assert number_of_training == np.sum(confusion_matrix)
-        assert number_right_total == np.trace(confusion_matrix)
-
-        confusion_matrix_df = pd.DataFrame(confusion_matrix)
-        column_dict = defaultdict(str)
-        row_dict = defaultdict(str)
-        for index in range(self.number_of_classes):
-            label_value = self.index_to_label_dict[index]
-            label_name = self.label_dict[label_value]
-            column_dict[index] = label_name
-            row_dict[index] = label_name
-        confusion_matrix_df.rename(columns=column_dict,
-                                   index=row_dict,
-                                   inplace=True)
-
-        return avg_loss, avg_accuracy, confusion_matrix_df
+        if epoch - self.min_epoch > 10:
+            return STOP_TRAINING
+        else:
+            return not STOP_TRAINING
 
     def create_plots_softmax(self):
         """
@@ -635,6 +556,14 @@ class SoftMaxRegression(Regression):
         """
         Calculate the negative gradient descent using stable softmax
 
+        weights = size(number of classes, number of components)
+        data = size(number of examples, number of components)
+        x = size(number of classes, number of examples)
+        a_matrix_max = size(number of examples,)
+        label = size(number of examples, number of classes)
+        difference = size(number of classes, number of examples)
+        update = size(number of classes, number of components)
+
         Args:
 
             weights: the weights of the model
@@ -644,126 +573,10 @@ class SoftMaxRegression(Regression):
         Returns:
             update: the gradient that needs to be used to update the weights
         """
-
-        """
-        weights = size(number of classes, number of components)
-        data = size(number of examples, number of components)
-        a_matrix = size(number of classes, number of examples)
-        a_matrix_max = size(number of examples,)
-        label = size(number of examples, number of classes)
-        difference = size(number of classes, number of examples)
-        update = size(number of classes, number of components)
-        """
-        a_matrix = weights @ data.transpose()
-        a_matrix_exp = np.exp(a_matrix)
-
-        sum_of_a_matrix_exp = np.sum(a_matrix_exp, axis=0)
-        y_matrix = a_matrix_exp / sum_of_a_matrix_exp.flatten()
-
-        difference = label.transpose() - y_matrix
-        update = difference @ data
-
-        assert update.shape == weights.shape
-
-        length_of_class = len(a_matrix)
-        length_of_examples = len(data)
-        update = 1.0 / length_of_class * 1.0 / length_of_examples * update
-
+        y = softmax(weights @ data.T)
+        update = (label.T - y) @ data
+        update /= (self.n_classes * len(data))
         return update
-
-    def _grad_weighted(self, weights: np.ndarray, data, label) -> np.ndarray:
-        """
-        Calculate the negative gradient descent using stable softmax
-
-        Args:
-
-            weights: the weights of the model
-            data: dataset
-            label: the labels
-
-        Returns:
-            update: the gradient that needs to be used to update the weights
-        """
-
-        """
-        weights = size(number of classes, number of components)
-        data = size(number of examples, number of components)
-        a_matrix = size(number of classes, number of examples)
-        a_matrix_max = size(number of examples,)
-        label = size(number of examples, number of classes)
-        difference = size(number of classes, number of examples)
-        update = size(number of classes, number of components)
-        """
-        a_matrix = weights @ data.transpose()
-        a_matrix_exp = np.exp(a_matrix)
-
-        sum_of_a_matrix_exp = np.sum(a_matrix_exp, axis=0)
-        y_matrix = a_matrix_exp / sum_of_a_matrix_exp.flatten()
-
-        difference = label.transpose() - y_matrix
-        update = difference @ data
-
-        assert update.shape == weights.shape
-
-        sum_each = np.sum(label, axis=0)
-        sum_total = np.sum(sum_each)
-        weight_balance = sum_total / (sum_each)
-        weighted_update = (update.transpose() * weight_balance.flatten()).transpose()
-
-        length_of_class = len(a_matrix)
-        length_of_examples = len(data)
-
-        assert weighted_update.shape == update.shape
-
-        return weighted_update * 1.0 / length_of_examples * 1.0 / length_of_class
-
-    def _stochastic_grad(self, weights: np.ndarray, data, label, learning_rate):
-        """
-        Calculate the negative gradient descent for stochastic descent
-
-        Args:
-
-            weights: the weights of the model
-            data: dataset
-            label: the labels
-            learning_rate: the learning rate
-
-        Returns:
-            update: the updated weights after going through all training examples
-        """
-
-        """
-                weights = size(number of classes, number of components)
-                data_singular = size(number of components, 1)
-                a_matrix = size(number of classes, 1)
-                label_singular = size(number of examples, 1)
-                difference = size(number of classes, 1)
-                update = size(number of classes, number of components)
-                """
-
-        # shuffle the order of the learning
-        index_list = [i for i in range(len(data))]
-        np.random.shuffle(index_list)
-
-        updated_weights = np.copy(weights)
-        # update the weights per training example
-        for index in index_list:
-            data_singular = np.reshape(data[index], (len(data[index]), 1))
-            a_matrix = updated_weights @ data_singular
-            a_matrix_exp = np.exp(a_matrix)
-            sum_of_a_matrix_exp = np.sum(a_matrix_exp)
-            y_matrix = a_matrix_exp / sum_of_a_matrix_exp
-
-            label_singular = np.reshape(label[index], (len(label[index]), 1))
-            difference = label_singular - y_matrix
-            update = difference @ data_singular.transpose()
-            assert update.shape == updated_weights.shape
-
-            length_of_class = len(a_matrix)
-
-            updated_weights = updated_weights + learning_rate * 1.0 / length_of_class * update
-
-        return updated_weights
 
     def loss_and_accuracy(self, weights: np.ndarray, data, label) -> (float, float):
         """
@@ -777,80 +590,14 @@ class SoftMaxRegression(Regression):
         Returns:
             (loss, accuracy): The loss and accuracy of the model
         """
-        a_matrix = weights @ data.transpose()
-        a_matrix_exp = np.exp(a_matrix)
-        sum_of_a_matrix_exp = np.sum(a_matrix_exp, axis=0)
-        y_matrix = a_matrix_exp / sum_of_a_matrix_exp.flatten()
-        y_matrix_log = np.log(y_matrix)
+        y = softmax(weights @ data.T)
+        predicted = y.argmax(axis=0)
+        log_y = np.log(y)
 
-        non_enc_pred = y_matrix.argmax(axis=0)
+        predicted_one_hot = self._encode_one_hot(predicted)
 
-        assert np.all(np.isclose(np.sum(y_matrix, axis=0), 1))
+        n_correct = np.sum(predicted_one_hot == label, axis=1)
+        accuracy = n_correct / len(predicted_one_hot)
 
-        # Need to convert to one hot encoding, so that can compare the predictions and labels
-        one_hot_enc_pred = None
-        for index in range(len(non_enc_pred)):
-            specific_encoding = np.zeros((1, self.number_of_classes))
-            specific_encoding[0][non_enc_pred[index]] = 1
-            if one_hot_enc_pred is None:
-                one_hot_enc_pred = specific_encoding
-            else:
-                one_hot_enc_pred = np.concatenate((one_hot_enc_pred, specific_encoding), axis=0)
-
-        total_correct = 0.0
-        for index in range(len(one_hot_enc_pred)):
-            if np.array_equal(one_hot_enc_pred[index], label[index]):
-                total_correct += 1
-        accuracy = total_correct / len(one_hot_enc_pred)
-
-        length_of_class = len(a_matrix)
-        length_of_examples = len(data)
-
-        if self.gradient_descent == "weighted":
-            sum_each = np.sum(label, axis=0)
-            sum_total = np.sum(sum_each)
-            weight_balance = sum_total / (sum_each)
-            y_matrix_log = (y_matrix_log.transpose() * weight_balance.flatten()).transpose()
-            loss = -1 * 1.0 / length_of_examples * np.sum(np.multiply(label.transpose(), y_matrix_log))
-        else:
-            loss = -1 * 1.0 / length_of_class * 1.0 / length_of_examples * np.sum(
-                np.multiply(label.transpose(), y_matrix_log))
+        loss = -np.sum(label.T * log_y) / (self.n_classes * len(data))
         return loss, accuracy
-
-    def gen_confusion_matrix(self, weights: np.ndarray, data, label) -> np.ndarray:
-        """
-        Get the confusion matrix based on the weights, data, and labels provided
-
-        Args:
-            weights: the weights of the model
-            data: the data set being used
-            label: the labels being used
-
-        Returns:
-            confusion_matrix: The confusion matrix for the dataset
-        """
-        a_matrix = weights @ data.transpose()
-        a_matrix_exp = np.exp(a_matrix)
-        sum_of_a_matrix_exp = np.sum(a_matrix_exp, axis=0)
-        y_matrix = a_matrix_exp / sum_of_a_matrix_exp.flatten()
-
-        non_enc_pred = y_matrix.argmax(axis=0)
-
-        # converting the true label value to the index value generated by softmax
-        converted_true_value = []
-        for true_value in label:
-            converted_true_value.append(self.label_to_index_dict[true_value])
-
-        confusion_matrix = np.zeros((self.number_of_classes, self.number_of_classes), int)
-        for index in range(len(non_enc_pred)):
-            i_true_value = converted_true_value[index]
-            j_pred = non_enc_pred[index]
-            confusion_matrix[i_true_value][j_pred] += 1
-
-        return confusion_matrix
-
-    def stable_soft_max(self, data):
-        max = np.max(data, axis=0)
-        output = data - max.flatten()
-        assert data.shape == output.shape
-        return output
