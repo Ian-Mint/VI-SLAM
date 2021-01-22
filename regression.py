@@ -4,15 +4,11 @@ from typing import Tuple, List
 
 import numpy as np
 import matplotlib.pyplot as plt
-import scipy.stats as stats
 
 from collections import defaultdict
 
-HOLDOUT = 'holdout'
 VALIDATION = 'validation'
 TRAIN = 'train'
-
-PCData = namedtuple('PCData', ('mean', 'singular_values', 'eigenvectors'))
 
 
 def rotate(x: list, n: int):
@@ -43,8 +39,7 @@ def sigmoid(x: np.ndarray) -> np.ndarray:
 
 
 class Regression(ABC):
-    def __init__(self, data_splits: List[np.ndarray], label_splits: List[np.ndarray], learning_rate=1e-5,
-                 n_principal_components=10, epochs=300):
+    def __init__(self, data_splits: List[np.ndarray], label_splits: List[np.ndarray], learning_rate=1e-5, epochs=300):
         """
         Base class for regression
 
@@ -53,9 +48,11 @@ class Regression(ABC):
                          Matrices must be of shape==(n,d) where n is the number of samples and d is the dimension.
             label_splits: List of label vectors corresponding to data matrices
             learning_rate: The optimization learning rate
-            n_principal_components: The number of principal components to use when reducing dimensionality
+            epochs: The maximum number of epochs over which to train
         """
-        self.n_pcs = n_principal_components
+        self.n_classes = self._validate_labels(label_splits)
+
+        self.data_dim = 3
         self.lr = learning_rate
         assert len(data_splits) == len(label_splits)
         self.n_splits = len(data_splits)
@@ -64,85 +61,58 @@ class Regression(ABC):
         self.label_splits = label_splits
         self.data_splits = data_splits
 
-        # Training splits and the pca data are all calculated and stored at the start of training. Other splits can
-        # be generated dynamically from self.label_splits and self.data_splits using the get_data_split and
-        # get_label_split methods.
-        self.train_splits: List[np.ndarray] = []
-        self.holdout_splits: List[np.ndarray] = []
-        self.val_splits: List[np.ndarray] = []
-        self.pca_data_splits: List[PCData] = []
-        self._init_pca()
-
-        assert len(self.holdout_splits) == len(self.val_splits) == len(self.train_splits)
-        # Storing the weights for each of the splits specified, initializing them to random values
-        self.weight_splits: List[np.ndarray] = [
-            stats.norm(loc=0, scale=1 / len(self.train_splits[0])).rvs(self.n_pcs + 1) for i in range(self.n_splits)
-        ]
-        self.best_weight_splits: List[np.ndarray] = [np.zeros(self.n_pcs + 1)] * self.n_splits
-
         # overall training and validation loss (split, epoch) is dimension
         self.overall_train_loss: np.ndarray = np.zeros((self.n_splits, self.epochs))
         self.overall_val_loss: np.ndarray = np.zeros((self.n_splits, self.epochs))
         # overall training and validation accuracy (split, epoch) is dimension
         self.overall_train_accuracy: np.ndarray = np.zeros((self.n_splits, self.epochs))
         self.overall_val_accuracy: np.ndarray = np.zeros((self.n_splits, self.epochs))
-        # test loss and accuracy on the best model for each split
-        self.test_loss: np.ndarray = np.zeros(self.n_splits)
-        self.test_accuracy: np.ndarray = np.zeros(self.n_splits)
-        # overall test loss and accuracy on the best model for each split
-        self.overall_test_loss: np.ndarray = np.zeros((self.n_splits, self.epochs))
-        self.overall_test_accuracy: np.ndarray = np.zeros((self.n_splits, self.epochs))
 
         self.min_val_loss = np.inf
 
-    def _init_pca(self):
+    @staticmethod
+    def _validate_labels(label_splits) -> int:
         """
-        Populate the PCA outputs for each split.
-
-        Returns:
-            None
+        Enforces that labels must start from 0 and be sequential
         """
-        for i in range(self.n_splits):
-            train_split = self.get_data_split(i, TRAIN)
-            val_split = self.get_data_split(i, VALIDATION)
-            holdout_split = self.get_data_split(i, HOLDOUT)
+        labels = np.concatenate(label_splits, 0)
+        unique = np.unique(labels)
+        sorted(unique)
+        n_unique = len(unique)
+        assert tuple(range(n_unique)) == tuple(unique)
+        assert np.min(unique) == 0
+        return n_unique
 
-            # If you do not want to use PCA
-            projected, mean, singular_values, eigenvectors = PCA(train_split, self.n_pcs)
 
-            assert np.all(np.isclose(np.mean(projected, axis=0), 0))
-            assert np.all(np.isclose(np.std(projected, axis=0) * np.sqrt(len(projected)), 1))
+    def _init_weights(self) -> List[np.ndarray]:
+        """
+        Returns a list of gaussian initialized weight vectors.
+        """
+        n_classes = self.n_classes
+        train_split_length = len(self.data_splits[0]) * (self.n_splits - 1)
+        initializer_scale = 1 / train_split_length
 
-            # adding in the bias term for the datasets
-            size_of_projected = len(projected)
-            one_vector = np.ones((size_of_projected,1))
-            new_projected = np.concatenate((projected, one_vector), axis=1)
+        if n_classes == 1:
+            weights = [
+                np.random.normal(loc=0, scale=initializer_scale, size=self.data_dim)
+                for _ in range(self.n_splits)
+            ]
+        else:
+            weights = [
+                np.random.multivariate_normal(0, initializer_scale * np.identity(n_classes), size=self.data_dim)
+                for _ in range(self.n_splits)
+            ]
+        return weights
 
-            self.train_splits.append(new_projected)
-            self.pca_data_splits.append(PCData(mean, singular_values, eigenvectors))
+    def one_augment(self, x: np.ndarray):
+        """
+        Augments x with ones along the data dimension (n x d)
+        """
+        assert np.ndim(x) == 2
+        assert x.shape[1] == self.data_dim
 
-            val_projected = ((val_split - mean) @ eigenvectors) / singular_values
-            size_of_projected = len(val_projected)
-            one_vector = np.ones((size_of_projected, 1))
-            new_val_projected = np.concatenate((val_projected, one_vector), axis=1)
-            self.val_splits.append(new_val_projected)
-
-            holdout_projected = ((holdout_split - mean) @ eigenvectors) / singular_values
-            size_of_projected = len(holdout_projected)
-            one_vector = np.ones((size_of_projected, 1))
-            new_holdout_projected = np.concatenate((holdout_projected, one_vector), axis=1)
-            self.holdout_splits.append(new_holdout_projected)
-
-            assert new_projected.shape[1] == new_val_projected.shape[1] == new_holdout_projected.shape[1]
-
-    def plot_pcs(self, split_number: int, n_pcs: int = 4):
-        eigenvectors = self.pca_data_splits[split_number].eigenvectors
-        for i in range(n_pcs):
-            plt.title(f"Principal component {i}")
-            img = eigenvectors[:, i].reshape(200, 300)
-            plt.imshow(img)
-            plt.colorbar()
-            plt.show()
+        one_vector = np.ones((len(x), 1))
+        return np.concatenate((x, one_vector), axis=1)
 
     def get_data_split(self, i: int, split_type: str) -> np.ndarray:
         """
@@ -174,10 +144,8 @@ class Regression(ABC):
         """
         if split_type == TRAIN:
             split_list = rotate(split_list, i)
-            split = np.concatenate(split_list[0:-2], axis=0)
+            split = np.concatenate(split_list[0:-1], axis=0)
         elif split_type == VALIDATION:
-            split = split_list[self.n_splits - i - 2]
-        elif split_type == HOLDOUT:
             split = split_list[self.n_splits - i - 1]
         else:
             raise ValueError(f"{split_type} is an invalid split type")
@@ -195,36 +163,28 @@ class Regression(ABC):
             for split_number in range(self.n_splits):
                 self.optimize(split_number, e)
 
-    def train(self, split_number: int):
-        """
-        Train using a single split
-
-        Args:
-            split_number: the index of the split
-
-        Returns:
-            None
-        """
-        for e in range(self.epochs):
-            self.optimize(split_number, e)
+    @abstractmethod
+    def optimize(self, split_number: int, epoch: int) -> None:
+        ...
 
     @abstractmethod
-    def optimize(self, split_number: int, epoch: int) -> None: ...
+    def _grad(self, weights: np.ndarray, data, label) -> np.ndarray:
+        ...
 
     @abstractmethod
-    def _grad(self, weights: np.ndarray, data, label) -> np.ndarray: ...
-
-    @abstractmethod
-    def loss_and_accuracy(self, new_weights, data, label) -> Tuple[float, float]: ...
+    def loss_and_accuracy(self, new_weights, data, label) -> Tuple[float, float]:
+        ...
 
 
 class LogisticRegression(Regression):
-    def __init__(self, data_splits: List[np.ndarray], label_splits: List[np.ndarray], learning_rate=1e-5,
-                 n_principal_components=10, epochs=300):
+    def __init__(self, data_splits: List[np.ndarray], label_splits: List[np.ndarray], learning_rate=1e-5, epochs=300):
         for label in label_splits:
             assert len(np.unique(label)) == 2, "LogisticRegression only handles two classes at a time"
             assert sorted(np.unique(label)) == [0, 1], "Class labels must be 0 or 1"
-        super().__init__(data_splits, label_splits, learning_rate, n_principal_components, epochs)
+        super().__init__(data_splits, label_splits, learning_rate, epochs)
+        self.n_classes = 2
+        self.weight_splits = self._init_weights()
+        self.best_weight_splits: List[np.ndarray] = [np.zeros(self.data_dim)] * self.n_splits
 
     def loss_and_accuracy(self, weights, data, label) -> Tuple[float, float]:
         loss = self._get_loss(data, label, weights)
@@ -266,13 +226,13 @@ class LogisticRegression(Regression):
             epoch:
             split_number: The index of the split to optimize
         """
-        data = self.train_splits[split_number]
+        data = self.get_data_split(split_number, TRAIN)
         label = self.get_label_split(split_number, TRAIN)
         weights = self.weight_splits[split_number]
 
         self._optimize(data, label, split_number, weights)
 
-        for split_type in (TRAIN, VALIDATION, HOLDOUT):
+        for split_type in (TRAIN, VALIDATION):
             self._update_stats(epoch, split_number, split_type)
 
         val_loss = self.overall_val_loss[split_number, epoch]
@@ -293,14 +253,7 @@ class LogisticRegression(Regression):
         """
         weights = self.best_weight_splits[split_number]
         label = self.get_label_split(split_number, split_type)
-        if split_type == TRAIN:
-            data = self.train_splits[split_number]
-        elif split_type == VALIDATION:
-            data = self.val_splits[split_number]
-        elif split_type == HOLDOUT:
-            data = self.holdout_splits[split_number]
-        else:
-            raise ValueError(f"{split_type} is an invalid split type")
+        data = self.get_data_split(split_number, split_type)
 
         loss = self._get_loss(data, label, weights)
         accuracy = self._get_accuracy(data, label, weights)
@@ -310,18 +263,13 @@ class LogisticRegression(Regression):
     def _update_stats(self, epoch: int, split_number: int, split_type: str):
         weights = self.weight_splits[split_number]
         label = self.get_label_split(split_number, split_type)
+        data = self.get_data_split(split_number, split_type)
         if split_type == TRAIN:
-            data = self.train_splits[split_number]
             overall_loss = self.overall_train_loss
             overall_accuracy = self.overall_train_accuracy
         elif split_type == VALIDATION:
-            data = self.val_splits[split_number]
             overall_loss = self.overall_val_loss
             overall_accuracy = self.overall_val_accuracy
-        elif split_type == HOLDOUT:
-            data = self.holdout_splits[split_number]
-            overall_loss = self.overall_test_loss
-            overall_accuracy = self.overall_test_accuracy
         else:
             raise ValueError(f"{split_type} is not a valid split type")
 
@@ -350,13 +298,13 @@ class LogisticRegression(Regression):
 
         Args:
             plot_params: See code for defaults
+            cross_validation: Set to True if this should run cross validation
         Returns:
             None
         """
         if plot_params is None:
             plot_params = {
                 'title': 'Softmax Regression Loss Error',
-
             }
 
         (avg_train_accuracy, avg_train_loss, avg_val_accuracy, avg_val_loss, std_train_accuracy, std_train_loss,
@@ -455,28 +403,17 @@ class LogisticRegression(Regression):
 class SoftMaxRegression(Regression):
     """
     Softmax Regression classifier
-
-    Args:
-        same as Regression, however has two more parameter
-        labels: the label dictionary to use for one-hot-encoding
-        gradient_descent: determine whether to do batch or stochastic gradient descent
     """
-    def __init__(self, data_splits: List[np.ndarray], label_splits: List[np.ndarray],
-                 labels: defaultdict, gradient_descent: str = "batch", learning_rate=1e-5,
-                 n_principal_components=10, epochs=300):
-        # initializing the base class
-        Regression.__init__(self, data_splits, label_splits, learning_rate, n_principal_components, epochs)
-        self.number_of_classes = len(labels)
-        # generating weight matrix for each split
-        self.softmax_weight_splits: List[np.ndarray] = [np.random.rand(self.number_of_classes, self.n_pcs + 1) for i in range(self.n_splits)]
-        self.softmax_best_weight_splits: List[np.ndarray] = [np.random.rand(self.number_of_classes, self.n_pcs + 1) for i in range(self.n_splits)]
-        self.softmax_best_loss_splits: List[float] = [-1.0] * self.n_splits
-        self.label_dict = labels
-        self.label_to_index_dict = defaultdict()
-        self.index_to_label_dict = defaultdict()
+
+    def __init__(self, data_splits: List[np.ndarray], label_splits: List[np.ndarray], learning_rate=1e-5, epochs=300):
+        super(SoftMaxRegression).__init__(self, data_splits, label_splits, learning_rate, epochs)
+        self.softmax_weight_splits = self._init_weights()
+        self.softmax_best_weight_splits: List[np.ndarray] = [np.zeros(self.n_classes, self.data_dim) for
+                                                             _ in range(self.n_splits)]
+        self.softmax_best_loss_splits: List[float] = [-np.inf] * self.n_splits
+
         self.one_hot_enc_dict = defaultdict(np.ndarray)
         self.init_one_hot_encoding()
-        self.gradient_descent = gradient_descent
 
     def init_one_hot_encoding(self):
         """
@@ -528,7 +465,7 @@ class SoftMaxRegression(Regression):
             None
 
         """
-        #Get the training and validation data
+        # Get the training and validation data
         train_data = self.train_splits[split_number]
         train_label = self.get_label_split(split_number, "train")
         val_data = self.val_splits[split_number]
@@ -592,7 +529,8 @@ class SoftMaxRegression(Regression):
             # convert the labels into one hot encodings
             one_hot_enc_holdout_label = self.generate_one_hot_encoding(holdout_label)
 
-            test_loss, test_accuracy = self.loss_and_accuracy(softmax_best_model_weights, holdout_data, one_hot_enc_holdout_label)
+            test_loss, test_accuracy = self.loss_and_accuracy(softmax_best_model_weights, holdout_data,
+                                                              one_hot_enc_holdout_label)
             confusion_matrix_split = self.gen_confusion_matrix(softmax_best_model_weights, holdout_data, holdout_label)
             number_right_total += test_accuracy * len(holdout_data)
 
@@ -643,7 +581,7 @@ class SoftMaxRegression(Regression):
         std_train_accuracy = np.std(train_accuracy_matrix, axis=0)
         std_val_accuracy = np.std(val_accuracy_matrix, axis=0)
 
-        x_axis = [(i+1) for i in range(self.epochs)]
+        x_axis = [(i + 1) for i in range(self.epochs)]
 
         error_bar_loss_train = []
         error_bar_loss_val = []
@@ -676,7 +614,6 @@ class SoftMaxRegression(Regression):
         plt.ylabel('loss error')
         plt.title('Softmax Regression Loss Error')
         plt.show()
-
 
         plt.errorbar(x_axis, avg_train_accuracy,
                      yerr=error_bar_accuracy_train,
@@ -730,7 +667,7 @@ class SoftMaxRegression(Regression):
 
         length_of_class = len(a_matrix)
         length_of_examples = len(data)
-        update = 1.0/length_of_class * 1.0/length_of_examples * update
+        update = 1.0 / length_of_class * 1.0 / length_of_examples * update
 
         return update
 
@@ -811,7 +748,6 @@ class SoftMaxRegression(Regression):
         updated_weights = np.copy(weights)
         # update the weights per training example
         for index in index_list:
-
             data_singular = np.reshape(data[index], (len(data[index]), 1))
             a_matrix = updated_weights @ data_singular
             a_matrix_exp = np.exp(a_matrix)
@@ -825,7 +761,7 @@ class SoftMaxRegression(Regression):
 
             length_of_class = len(a_matrix)
 
-            updated_weights = updated_weights + learning_rate * 1.0/length_of_class * update
+            updated_weights = updated_weights + learning_rate * 1.0 / length_of_class * update
 
         return updated_weights
 
@@ -849,12 +785,12 @@ class SoftMaxRegression(Regression):
 
         non_enc_pred = y_matrix.argmax(axis=0)
 
-        assert np.all(np.isclose(np.sum(y_matrix, axis=0),1))
+        assert np.all(np.isclose(np.sum(y_matrix, axis=0), 1))
 
         # Need to convert to one hot encoding, so that can compare the predictions and labels
         one_hot_enc_pred = None
         for index in range(len(non_enc_pred)):
-            specific_encoding = np.zeros((1,self.number_of_classes))
+            specific_encoding = np.zeros((1, self.number_of_classes))
             specific_encoding[0][non_enc_pred[index]] = 1
             if one_hot_enc_pred is None:
                 one_hot_enc_pred = specific_encoding
@@ -863,7 +799,7 @@ class SoftMaxRegression(Regression):
 
         total_correct = 0.0
         for index in range(len(one_hot_enc_pred)):
-            if np.array_equal(one_hot_enc_pred[index],label[index]):
+            if np.array_equal(one_hot_enc_pred[index], label[index]):
                 total_correct += 1
         accuracy = total_correct / len(one_hot_enc_pred)
 
@@ -875,9 +811,10 @@ class SoftMaxRegression(Regression):
             sum_total = np.sum(sum_each)
             weight_balance = sum_total / (sum_each)
             y_matrix_log = (y_matrix_log.transpose() * weight_balance.flatten()).transpose()
-            loss = -1 * 1.0/length_of_examples * np.sum(np.multiply(label.transpose(), y_matrix_log))
+            loss = -1 * 1.0 / length_of_examples * np.sum(np.multiply(label.transpose(), y_matrix_log))
         else:
-            loss = -1 * 1.0/length_of_class * 1.0/length_of_examples * np.sum(np.multiply(label.transpose(), y_matrix_log))
+            loss = -1 * 1.0 / length_of_class * 1.0 / length_of_examples * np.sum(
+                np.multiply(label.transpose(), y_matrix_log))
         return loss, accuracy
 
     def gen_confusion_matrix(self, weights: np.ndarray, data, label) -> np.ndarray:
