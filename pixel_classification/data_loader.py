@@ -15,10 +15,28 @@ CLASS_DIRS = Classes(BLUE_DIR, GREEN_DIR, RED_DIR)
 
 
 class DataLoader:
-    def __init__(self):
-        self.k = 5
+    def __init__(self, n_splits=5, resample=True):
+        self.k = n_splits
         self.data = []
         self._load_data()
+        if resample:
+            self._resample()
+
+    def _resample(self):
+        max_len = max(len(d) for d in self.data)
+
+        for label in range(len(self.data)):
+            d = self.data[label]
+            missing = max_len - len(d)
+            if missing == 0:
+                continue
+
+            mean = np.mean(d, 0)
+            cov = np.cov(d.T)
+            samples = np.random.multivariate_normal(mean, cov, size=missing)
+
+            self.data[label] = np.concatenate((d, samples), axis=0)
+            np.random.shuffle(self.data[label])
 
     def _load_data(self):
         for d in CLASS_DIRS:
@@ -38,7 +56,6 @@ class DataLoader:
 
         for label in range(num_of_classes):
             data_copy = self.data[label].copy()
-            np.random.shuffle(data_copy)
 
             data_np_split = np.array_split(data_copy, self.k)  # split the array into k partitions
             labels_split = []
