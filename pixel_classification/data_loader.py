@@ -42,7 +42,7 @@ class DataLoader:
         for d in CLASS_DIRS:
             self.data.append(read_pixels(d))
 
-    def split(self):
+    def get_splits(self):
         """
         Splits the data and labels into k splits.
 

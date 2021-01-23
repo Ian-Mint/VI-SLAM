@@ -40,7 +40,7 @@ def softmax(x):
     x_exp = np.exp(x)
     sum_x_exp = np.sum(x_exp, axis=0)
     y = x_exp / sum_x_exp
-    assert np.all(np.sum(y, axis=0), 1)
+    assert np.all(np.isclose(np.sum(y, axis=0), 1))
     return y
 
 
@@ -104,8 +104,10 @@ class Regression(ABC):
                 for _ in range(self.n_splits)
             ]
         else:
+            mean = np.zeros(n_classes)
+            cov = initializer_scale * np.identity(n_classes)
             weights = [
-                np.random.multivariate_normal(0, initializer_scale * np.identity(n_classes), size=self.data_dim)
+                np.random.multivariate_normal(mean, cov, size=self.data_dim)
                 for _ in range(self.n_splits)
             ]
         return weights
@@ -413,10 +415,11 @@ class SoftMaxRegression(Regression):
     """
 
     def __init__(self, data_splits: List[np.ndarray], label_splits: List[np.ndarray], learning_rate=1e-5, epochs=300):
-        super(SoftMaxRegression).__init__(self, data_splits, label_splits, learning_rate, epochs)
+        super().__init__(data_splits, label_splits, learning_rate, epochs)
         self.weights = self._init_weights()
-        self.best_weights: List[np.ndarray] = [np.zeros(self.n_classes, self.data_dim) for
-                                               _ in range(self.n_splits)]
+        self.best_weights: List[np.ndarray] = [
+            np.zeros((self.n_classes, self.data_dim)) for _ in range(self.n_splits)
+        ]
         self.min_loss: List[float] = [-np.inf] * self.n_splits
 
     def _encode_one_hot(self, labels: np.ndarray) -> np.ndarray:
@@ -465,10 +468,10 @@ class SoftMaxRegression(Regression):
         val_loss, val_accuracy = self.loss_and_accuracy(weights, val_data, one_hot_enc_val_label)
 
         # record training, val loss and accuracy
-        self.overall_train_loss[split_number][epoch] = train_loss
-        self.overall_val_loss[split_number][epoch] = val_loss
-        self.overall_train_accuracy[split_number][epoch] = train_accuracy
-        self.overall_val_accuracy[split_number][epoch] = val_accuracy
+        self.overall_train_loss[split_number, epoch] = train_loss
+        self.overall_val_loss[split_number, epoch] = val_loss
+        self.overall_train_accuracy[split_number, epoch] = train_accuracy
+        self.overall_val_accuracy[split_number, epoch] = val_accuracy
 
         if val_loss < self.min_loss[split_number]:
             self.min_loss[split_number] = val_loss
@@ -596,8 +599,8 @@ class SoftMaxRegression(Regression):
 
         predicted_one_hot = self._encode_one_hot(predicted)
 
-        n_correct = np.sum(predicted_one_hot == label, axis=1)
-        accuracy = n_correct / len(predicted_one_hot)
+        n_correct = np.sum(np.sum(predicted_one_hot == label, axis=1) == self.n_classes)
+        accuracy = n_correct / len(y)
 
         loss = -np.sum(label.T * log_y) / (self.n_classes * len(data))
         return loss, accuracy

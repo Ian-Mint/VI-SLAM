@@ -2,12 +2,10 @@
 ECE276A WI21 PR1: Color Classification and Recycling Bin Detection
 """
 
-from collections import namedtuple
-
 import numpy as np
-# noinspection PyUnresolvedReferences
-from generate_rgb_data import read_pixels
 
+from data_loader import DataLoader
+from regression import SoftMaxRegression
 
 BLUE_DIR = 'data/training/blue'
 GREEN_DIR = 'data/training/green'
@@ -19,11 +17,13 @@ class PixelClassifier:
         """
         Initialize your classifier with any parameters and attributes you need
         """
-        self.data = dict()
-        self._train()
+        self.n_splits = 5
 
-    def _train(self):
-        pass
+        data_loader = DataLoader(n_splits=self.n_splits, resample=True)
+        data, labels = data_loader.get_splits()
+
+        self.learner = SoftMaxRegression(data, labels, learning_rate=1e-5, epochs=1000)
+        self.learner.cv_train()
 
     def classify(self, X):
         """

@@ -5,6 +5,7 @@ import numpy as np
 # noinspection PyUnresolvedReferences
 from generate_rgb_data import read_pixels
 from data_loader import DataLoader
+from pixel_classifier import PixelClassifier
 
 
 class TestDataLoader(unittest.TestCase):
@@ -25,7 +26,7 @@ class TestDataLoader(unittest.TestCase):
             self.assertEqual(3, d.shape[1])
 
     def test_splits(self):
-        data, labels = self.loader.split()
+        data, labels = self.loader.get_splits()
         self.assertEqual(self.n_splits, len(data))
         self.assertEqual(self.n_splits, len(labels))
 
@@ -34,6 +35,17 @@ class TestDataLoader(unittest.TestCase):
             shape = self.loader.data[0].shape
             for d in self.loader.data:
                 self.assertEqual(shape, d.shape)
+
+
+class TestPixelClassifier(unittest.TestCase):
+    def test_basic(self):
+        folder = 'data/training/blue'
+
+        X = read_pixels(folder)
+        myPixelClassifier = PixelClassifier()
+        y = myPixelClassifier.classify(X)
+
+        print('Precision: %f' % (sum(y == 1) / y.shape[0]))
 
 
 if __name__ == '__main__':
