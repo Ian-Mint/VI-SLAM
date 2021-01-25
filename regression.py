@@ -45,23 +45,31 @@ def softmax(x):
 
 
 class Regression(ABC):
-    def __init__(self, data_splits: List[np.ndarray], label_splits: List[np.ndarray], learning_rate=1e-5, epochs=300):
+    def __init__(self, data_splits: List[np.ndarray], label_splits: List[np.ndarray], learning_rate=1e-5, epochs=300,
+                 cross_validation=True):
         """
-        Base class for regression
+        Base class for regression. If cross_validation==False, label_splits and data_splits should be of length 2 with
+        the first element the training data and the second element the validation data. Otherwise, they should be of
+        length equal to the number of cross-validation splits.
 
         Args:
+            cross_validation:
             data_splits: List of data matrices.
                          Matrices must be of shape==(n,d) where n is the number of samples and d is the dimension.
             label_splits: List of label vectors corresponding to data matrices
             learning_rate: The optimization learning rate
             epochs: The maximum number of epochs over which to train
+            cross_validation: if True, use cross-validation
         """
+        self.cv = cross_validation
         self.n_classes = self._validate_labels(label_splits)
+        assert self.n_classes >= 2
 
         self.data_dim = 3
         self.lr = learning_rate
         assert len(data_splits) == len(label_splits)
-        self.n_splits = len(data_splits)
+        assert len(data_splits) >= 2
+        self.n_splits = len(data_splits) if cross_validation else 1
         self.epochs = epochs
 
         self.label_splits = label_splits
@@ -95,21 +103,15 @@ class Regression(ABC):
         Returns a list of gaussian initialized weight vectors.
         """
         n_classes = self.n_classes
-        train_split_length = len(self.data_splits[0]) * (self.n_splits - 1)
+        train_split_length = len(self.data_splits[0]) * self.n_splits
         initializer_scale = 1 / train_split_length
 
-        if n_classes == 1:
-            weights = [
-                np.random.normal(loc=0, scale=initializer_scale, size=self.data_dim)
-                for _ in range(self.n_splits)
-            ]
-        else:
-            mean = np.zeros(n_classes)
-            cov = initializer_scale * np.identity(n_classes)
-            weights = [
-                np.random.multivariate_normal(mean, cov, size=self.data_dim)
-                for _ in range(self.n_splits)
-            ]
+        mean = np.zeros(n_classes)
+        cov = initializer_scale * np.identity(n_classes)
+        weights = [
+            np.random.multivariate_normal(mean, cov, size=self.data_dim)
+            for _ in range(self.n_splits)
+        ]
         return weights
 
     def one_augment(self, x: np.ndarray):
@@ -150,19 +152,26 @@ class Regression(ABC):
         """
         Method for returning data split or label split
         """
-        if split_type == TRAIN:
-            split_list = rotate(split_list, i)
-            split = np.concatenate(split_list[0:-1], axis=0)
-        elif split_type == VALIDATION:
-            split = split_list[self.n_splits - i - 1]
+        if self.n_splits >= 2:
+            if split_type == TRAIN:
+                split_list = rotate(split_list, i)
+                split = np.concatenate(split_list[0:-1], axis=0)
+            elif split_type == VALIDATION:
+                split = split_list[self.n_splits - i - 1]
+            else:
+                raise ValueError(f"{split_type} is an invalid split type")
         else:
-            raise ValueError(f"{split_type} is an invalid split type")
-
+            if split_type == TRAIN:
+                split = split_list[0]
+            elif split_type == VALIDATION:
+                split = split_list[1]
+            else:
+                raise ValueError(f"{split_type} is an invalid split type")
         return split
 
-    def cv_train(self):
+    def train(self):
         """
-        Train using cross-validation
+        Train using cross-validation. Won't use cross-validation if there are only 2 splits.
         """
         for e in range(self.epochs):
             stop_training = True
@@ -183,230 +192,6 @@ class Regression(ABC):
     @abstractmethod
     def loss_and_accuracy(self, new_weights, data, label) -> Tuple[float, float]:
         ...
-
-
-class LogisticRegression(Regression):
-    def __init__(self, data_splits: List[np.ndarray], label_splits: List[np.ndarray], learning_rate=1e-5, epochs=300):
-        for label in label_splits:
-            assert len(np.unique(label)) == 2, "LogisticRegression only handles two classes at a time"
-            assert sorted(np.unique(label)) == [0, 1], "Class labels must be 0 or 1"
-        super().__init__(data_splits, label_splits, learning_rate, epochs)
-        self.n_classes = 2
-        self.weight_splits = self._init_weights()
-        self.best_weight_splits: List[np.ndarray] = [np.zeros(self.data_dim)] * self.n_splits
-
-    def loss_and_accuracy(self, weights, data, label) -> Tuple[float, float]:
-        loss = self._get_loss(data, label, weights)
-        accuracy = self._get_accuracy(data, label, weights)
-        return loss, accuracy
-
-    def _get_accuracy(self, data, label, weights) -> float:
-        return (np.sum(self.predict(data, weights) == label) / len(label)).item()
-
-    def _grad(self, weights: np.ndarray, data, label) -> np.ndarray:
-        return data.T @ (sigmoid(data @ weights) - label)
-
-    @staticmethod
-    def _get_loss(data: np.ndarray, label: np.ndarray, weights: np.ndarray) -> float:
-        n = len(label)
-        s = sigmoid(data @ weights)
-        return (-label.T @ np.log(s) - (1 - label.T) @ np.log(1 - s)).item() / n
-
-    @staticmethod
-    def predict(samples: np.ndarray, weights) -> np.ndarray:
-        """
-        Predict the class of an array of samples
-
-        Args:
-            weights: the logistic regression weights
-            samples: numpy array with `data.shape==(n, d)`. `n` is the number of samples and `d` is the data dimension.
-
-        Returns:
-            numpy array of predicted classes
-        """
-        result = (np.log(sigmoid(samples @ weights)) - np.log(sigmoid(-samples @ weights))) > 0
-        return result.astype(int)
-
-    def optimize(self, split_number: int, epoch: int) -> None:
-        """
-        Run parameter optimization
-
-        Args:
-            epoch:
-            split_number: The index of the split to optimize
-        """
-        data = self.get_data_split(split_number, TRAIN)
-        label = self.get_label_split(split_number, TRAIN)
-        weights = self.weight_splits[split_number]
-
-        self._optimize(data, label, split_number, weights)
-
-        for split_type in (TRAIN, VALIDATION):
-            self._update_stats(epoch, split_number, split_type)
-
-        val_loss = self.overall_val_loss[split_number, epoch]
-        if val_loss < self.min_val_loss:
-            self.min_val_loss = val_loss
-            self.best_weight_splits[split_number][:] = self.weight_splits[split_number]
-
-    def final_results(self, split_number: int, split_type: str) -> Tuple[float, float]:
-        """
-        Compute the loss and accuracy given the holdout dataset
-
-        Args:
-            split_type: one of 'train', 'validation', 'holdout'
-            split_number: The split number to report
-
-        Returns:
-            loss, accuracy
-        """
-        weights = self.best_weight_splits[split_number]
-        label = self.get_label_split(split_number, split_type)
-        data = self.get_data_split(split_number, split_type)
-
-        loss = self._get_loss(data, label, weights)
-        accuracy = self._get_accuracy(data, label, weights)
-
-        return loss, accuracy
-
-    def _update_stats(self, epoch: int, split_number: int, split_type: str):
-        weights = self.weight_splits[split_number]
-        label = self.get_label_split(split_number, split_type)
-        data = self.get_data_split(split_number, split_type)
-        if split_type == TRAIN:
-            overall_loss = self.overall_train_loss
-            overall_accuracy = self.overall_train_accuracy
-        elif split_type == VALIDATION:
-            overall_loss = self.overall_val_loss
-            overall_accuracy = self.overall_val_accuracy
-        else:
-            raise ValueError(f"{split_type} is not a valid split type")
-
-        loss, accuracy = self.loss_and_accuracy(weights, data, label)
-        overall_loss[split_number, epoch] = loss
-        overall_accuracy[split_number, epoch] = accuracy
-
-    def _optimize(self, data, label, split_number, weights):
-        """
-        Perform the weight update
-
-        Args:
-            data: The data matrix for a split
-            label: The labels for a split
-            split_number: The split number
-            weights: The weights for a split
-
-        Returns:
-            None
-        """
-        self.weight_splits[split_number] = weights - (self.lr / len(label)) * self._grad(weights, data, label)
-
-    def create_plots(self, plot_params: dict = None, cross_validation=True):
-        """
-        Generate training and validation plots for loss and accuracy
-
-        Args:
-            plot_params: See code for defaults
-            cross_validation: Set to True if this should run cross validation
-        Returns:
-            None
-        """
-        if plot_params is None:
-            plot_params = {
-                'title': 'Softmax Regression Loss Error',
-            }
-
-        (avg_train_accuracy, avg_train_loss, avg_val_accuracy, avg_val_loss, std_train_accuracy, std_train_loss,
-         std_val_accuracy, std_val_loss) = self._get_plot_data(cross_validation)
-
-        (error_bar_accuracy_train, error_bar_accuracy_val, error_bar_loss_train, error_bar_loss_val) = \
-            self._generate_error_bars(std_train_accuracy, std_train_loss, std_val_accuracy, std_val_loss)
-
-        x_axis = list(range(1, self.epochs + 1))
-
-        plt.errorbar(x_axis, avg_train_loss,
-                     yerr=error_bar_loss_train,
-                     fmt='b-',
-                     label="training",
-                     solid_capstyle='projecting',
-                     capsize=3)
-        plt.errorbar(x_axis, avg_val_loss,
-                     yerr=error_bar_loss_val,
-                     fmt='r-',
-                     label="validation",
-                     solid_capstyle='projecting',
-                     capsize=3)
-
-        plt.legend(loc='upper right')
-        plt.xlabel("epoch")
-        plt.ylabel("loss error")
-        plt.title(plot_params['title'])
-        plt.show()
-
-        plt.errorbar(x_axis, avg_train_accuracy,
-                     yerr=error_bar_accuracy_train,
-                     fmt='b-',
-                     label="training",
-                     solid_capstyle='projecting',
-                     capsize=3)
-
-        plt.errorbar(x_axis, avg_val_accuracy,
-                     yerr=error_bar_accuracy_val,
-                     fmt='r-',
-                     label="validation",
-                     solid_capstyle='projecting',
-                     capsize=3)
-
-        plt.legend(loc="upper right")
-        plt.xlabel('epochs')
-        plt.ylabel('accuracy')
-        plt.title(plot_params['title'])
-        plt.show()
-
-    def _generate_error_bars(self, std_train_accuracy, std_train_loss, std_val_accuracy, std_val_loss):
-        error_bar_loss_train = []
-        error_bar_loss_val = []
-        error_bar_accuracy_train = []
-        error_bar_accuracy_val = []
-        for epoch in range(self.epochs):
-            if (epoch + 1) % 50 == 0:
-                error_bar_loss_train.append(std_train_loss[epoch])
-                error_bar_loss_val.append(std_val_loss[epoch])
-                error_bar_accuracy_train.append(std_train_accuracy[epoch])
-                error_bar_accuracy_val.append(std_val_accuracy[epoch])
-            else:
-                error_bar_loss_train.append(np.nan)
-                error_bar_loss_val.append(np.nan)
-                error_bar_accuracy_train.append(np.nan)
-                error_bar_accuracy_val.append(np.nan)
-        return error_bar_accuracy_train, error_bar_accuracy_val, error_bar_loss_train, error_bar_loss_val
-
-    def _get_plot_data(self, cross_validation):
-        train_loss_matrix = self.overall_train_loss
-        val_loss_matrix = self.overall_val_loss
-        train_accuracy_matrix = self.overall_train_accuracy
-        val_accuracy_matrix = self.overall_val_accuracy
-        if cross_validation:
-            avg_train_loss = np.average(train_loss_matrix, axis=0)
-            avg_val_loss = np.average(val_loss_matrix, axis=0)
-            avg_train_accuracy = np.average(train_accuracy_matrix, axis=0)
-            avg_val_accuracy = np.average(val_accuracy_matrix, axis=0)
-
-            std_train_loss = np.std(train_loss_matrix, axis=0)
-            std_val_loss = np.std(val_loss_matrix, axis=0)
-            std_train_accuracy = np.std(train_accuracy_matrix, axis=0)
-            std_val_accuracy = np.std(val_accuracy_matrix, axis=0)
-        else:
-            avg_train_loss = train_loss_matrix[0, :]
-            avg_val_loss = val_loss_matrix[0, :]
-            avg_train_accuracy = train_accuracy_matrix[0, :]
-            avg_val_accuracy = val_accuracy_matrix[0, :]
-
-            std_train_loss = np.zeros_like(avg_train_loss)
-            std_val_loss = np.zeros_like(avg_val_loss)
-            std_train_accuracy = np.zeros_like(avg_train_accuracy)
-            std_val_accuracy = np.zeros_like(avg_val_accuracy)
-        return avg_train_accuracy, avg_train_loss, avg_val_accuracy, avg_val_loss, std_train_accuracy, std_train_loss, std_val_accuracy, std_val_loss
 
 
 class SoftMaxRegression(Regression):
@@ -593,14 +378,32 @@ class SoftMaxRegression(Regression):
         Returns:
             (loss, accuracy): The loss and accuracy of the model
         """
-        y = softmax(weights @ data.T)
-        predicted = y.argmax(axis=0)
-        log_y = np.log(y)
+        predicted, log_y = self._classify(data, weights)
 
         predicted_one_hot = self._encode_one_hot(predicted)
 
         n_correct = np.sum(np.sum(predicted_one_hot == label, axis=1) == self.n_classes)
-        accuracy = n_correct / len(y)
+        accuracy = n_correct / len(log_y)
 
         loss = -np.sum(label.T * log_y) / (self.n_classes * len(data))
         return loss, accuracy
+
+    def classify(self, data):
+        self._classify(data, self.best_weights)
+
+    @staticmethod
+    def _classify(data: np.ndarray, weights: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+        """
+        Classifies the data given the weights
+
+        Args:
+            data: data (n x d)
+            weights: weights (d x n_classes)
+
+        Returns:
+            predicted labels, log of the softmax
+        """
+        y = softmax(weights @ data.T)
+        predicted = y.argmax(axis=0)
+        log_y = np.log(y)
+        return predicted, log_y

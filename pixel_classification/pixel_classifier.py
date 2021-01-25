@@ -23,7 +23,7 @@ class PixelClassifier:
         data, labels = data_loader.get_splits()
 
         self.learner = SoftMaxRegression(data, labels, learning_rate=1e-5, epochs=1000)
-        self.learner.cv_train()
+        self.learner.train()
 
     def classify(self, X):
         """
@@ -37,5 +37,5 @@ class PixelClassifier:
         # YOUR CODE HERE
         # Just a random classifier for now
         # Replace this with your own approach
-        y = 1 + np.random.randint(3, size=X.shape[0])
-        return y
+        fake = 1 + np.random.randint(3, size=X.shape[0])
+        return fake
