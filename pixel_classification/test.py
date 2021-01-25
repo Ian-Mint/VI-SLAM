@@ -12,17 +12,17 @@ class TestDataLoader(unittest.TestCase):
     def setUp(self) -> None:
         self.n_splits = 5
         self.resample = True
-        self.loader = DataLoader(self.n_splits, self.resample)
+        self.loader = DataLoader(self.n_splits, resample=self.resample)
 
     def test_we_get_3_data_classes(self):
-        self.assertEqual(3, len(self.loader.data))
+        self.assertEqual(3, len(self.loader.train_data))
 
     def test_each_class_is_a_numpy_array(self):
-        for d in self.loader.data:
+        for d in self.loader.train_data:
             self.assertIsInstance(d, np.ndarray)
 
     def test_each_class_has_second_dim_equal_to_3(self):
-        for d in self.loader.data:
+        for d in self.loader.train_data:
             self.assertEqual(3, d.shape[1])
 
     def test_splits(self):
@@ -32,8 +32,8 @@ class TestDataLoader(unittest.TestCase):
 
     def test_resampling(self):
         if self.resample:
-            shape = self.loader.data[0].shape
-            for d in self.loader.data:
+            shape = self.loader.train_data[0].shape
+            for d in self.loader.train_data:
                 self.assertEqual(shape, d.shape)
 
 

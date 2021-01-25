@@ -85,6 +85,12 @@ class Regression(ABC):
         self.min_val_loss = np.inf
         self.min_epoch = 0
 
+        self.weights = self._init_weights()
+        self.best_weights: List[np.ndarray] = [
+            np.zeros((self.n_classes, self.data_dim)) for _ in range(self.n_splits)
+        ]
+        self.min_loss: List[float] = [-np.inf] * self.n_splits
+
     @staticmethod
     def _validate_labels(label_splits) -> int:
         """
@@ -181,32 +187,6 @@ class Regression(ABC):
             if stop_training:
                 return
 
-    @abstractmethod
-    def optimize(self, split_number: int, epoch: int) -> None:
-        ...
-
-    @abstractmethod
-    def _grad(self, weights: np.ndarray, data, label) -> np.ndarray:
-        ...
-
-    @abstractmethod
-    def loss_and_accuracy(self, new_weights, data, label) -> Tuple[float, float]:
-        ...
-
-
-class SoftMaxRegression(Regression):
-    """
-    Softmax Regression classifier
-    """
-
-    def __init__(self, data_splits: List[np.ndarray], label_splits: List[np.ndarray], learning_rate=1e-5, epochs=300):
-        super().__init__(data_splits, label_splits, learning_rate, epochs)
-        self.weights = self._init_weights()
-        self.best_weights: List[np.ndarray] = [
-            np.zeros((self.n_classes, self.data_dim)) for _ in range(self.n_splits)
-        ]
-        self.min_loss: List[float] = [-np.inf] * self.n_splits
-
     def _encode_one_hot(self, labels: np.ndarray) -> np.ndarray:
         """
         The label vector to encode
@@ -268,7 +248,7 @@ class SoftMaxRegression(Regression):
         else:
             return not STOP_TRAINING
 
-    def create_plots_softmax(self):
+    def create_plots(self):
         """
         Generate training and validation plots for loss and accuracy
 
@@ -342,7 +322,7 @@ class SoftMaxRegression(Regression):
 
     def _grad(self, weights: np.ndarray, data, label) -> np.ndarray:
         """
-        Calculate the negative gradient descent using stable softmax
+        Calculate the negative gradient of the softmax with cross-entropy loss
 
         weights = size(number of classes, number of components)
         data = size(number of examples, number of components)
@@ -389,7 +369,17 @@ class SoftMaxRegression(Regression):
         return loss, accuracy
 
     def classify(self, data):
-        self._classify(data, self.best_weights)
+        """
+
+        Args:
+            data: (n x d) data to classify
+
+        Returns:
+            predicted labels
+        """
+        if self.cv:
+            raise ValueError("Classification does not work with cross-validation")
+        return self._classify(data, self.best_weights[0])[0]
 
     @staticmethod
     def _classify(data: np.ndarray, weights: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:

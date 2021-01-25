@@ -5,7 +5,7 @@ ECE276A WI21 PR1: Color Classification and Recycling Bin Detection
 import numpy as np
 
 from data_loader import DataLoader
-from regression import SoftMaxRegression
+from regression import Regression
 
 BLUE_DIR = 'data/training/blue'
 GREEN_DIR = 'data/training/green'
@@ -17,12 +17,10 @@ class PixelClassifier:
         """
         Initialize your classifier with any parameters and attributes you need
         """
-        self.n_splits = 5
-
         data_loader = DataLoader(n_splits=self.n_splits, resample=True)
         data, labels = data_loader.get_splits()
 
-        self.learner = SoftMaxRegression(data, labels, learning_rate=1e-5, epochs=1000)
+        self.learner = Regression(data, labels, learning_rate=1e-5, epochs=1000)
         self.learner.train()
 
     def classify(self, X):
