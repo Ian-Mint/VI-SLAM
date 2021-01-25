@@ -38,14 +38,29 @@ class TestDataLoader(unittest.TestCase):
 
 
 class TestPixelClassifier(unittest.TestCase):
-    def test_basic(self):
+    def setUp(self) -> None:
+        self.classifier = PixelClassifier()
+
+    def test_blue_precision_is_above_50(self):
         folder = 'data/training/blue'
+        x = read_pixels(folder)
+        y = self.classifier.classify(x)
 
-        X = read_pixels(folder)
-        myPixelClassifier = PixelClassifier()
-        y = myPixelClassifier.classify(X)
+        self.assertGreater(sum(y == 1) / len(y), 0.5)
 
-        print('Precision: %f' % (sum(y == 1) / y.shape[0]))
+    def test_green_precision_is_above_50(self):
+        folder = 'data/training/green'
+        x = read_pixels(folder)
+        y = self.classifier.classify(x)
+
+        self.assertGreater(sum(y == 2) / len(y), 0.5)
+
+    def test_red_precision_is_above_50(self):
+        folder = 'data/training/red'
+        x = read_pixels(folder)
+        y = self.classifier.classify(x)
+
+        self.assertGreater(sum(y == 3) / len(y), 0.5)
 
 
 if __name__ == '__main__':

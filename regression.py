@@ -370,6 +370,7 @@ class Regression(ABC):
 
     def classify(self, data):
         """
+        Classify the data
 
         Args:
             data: (n x d) data to classify

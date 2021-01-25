@@ -17,10 +17,10 @@ class PixelClassifier:
         """
         Initialize your classifier with any parameters and attributes you need
         """
-        data_loader = DataLoader(n_splits=self.n_splits, resample=True)
+        data_loader = DataLoader(n_splits=0, resample=True, cross_validation=False)
         data, labels = data_loader.get_splits()
 
-        self.learner = Regression(data, labels, learning_rate=1e-5, epochs=1000)
+        self.learner = Regression(data, labels, learning_rate=1e-5, epochs=1000, cross_validation=False)
         self.learner.train()
 
     def classify(self, X):
@@ -35,5 +35,6 @@ class PixelClassifier:
         # YOUR CODE HERE
         # Just a random classifier for now
         # Replace this with your own approach
+        real = 1 + self.learner.classify(X)
         fake = 1 + np.random.randint(3, size=X.shape[0])
-        return fake
+        return real
