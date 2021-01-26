@@ -14,6 +14,13 @@ VAL_DIRS = Classes('data/validation/blue', 'data/validation/green', 'data/valida
 
 class DataLoader:
     def __init__(self, n_splits=5, cross_validation=True, resample=True):
+        """
+
+        Args:
+            n_splits:
+            cross_validation:
+            resample:
+        """
         self.cv = cross_validation
         self.k = n_splits
         self.train_data = []

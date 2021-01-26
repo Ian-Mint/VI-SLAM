@@ -1,4 +1,3 @@
-from abc import ABC, abstractmethod
 from typing import Tuple, List
 
 import matplotlib.pyplot as plt
@@ -38,13 +37,12 @@ def sigmoid(x: np.ndarray) -> np.ndarray:
 
 def softmax(x):
     x_exp = np.exp(x)
-    sum_x_exp = np.sum(x_exp, axis=0)
-    y = x_exp / sum_x_exp
+    y = x_exp / np.sum(x_exp, axis=0)
     assert np.all(np.isclose(np.sum(y, axis=0), 1))
     return y
 
 
-class Regression(ABC):
+class Regression:
     def __init__(self, data_splits: List[np.ndarray], label_splits: List[np.ndarray], learning_rate=1e-5, epochs=300,
                  cross_validation=True):
         """
@@ -89,7 +87,7 @@ class Regression(ABC):
         self.best_weights: List[np.ndarray] = [
             np.zeros((self.n_classes, self.data_dim)) for _ in range(self.n_splits)
         ]
-        self.min_loss: List[float] = [-np.inf] * self.n_splits
+        self.min_loss: List[float] = [np.inf] * self.n_splits
 
     @staticmethod
     def _validate_labels(label_splits) -> int:
@@ -182,25 +180,30 @@ class Regression(ABC):
         for e in range(self.epochs):
             stop_training = True
             for split_number in range(self.n_splits):
-                stop_training &= self.optimize(split_number, e)
-            # stop training if we get a stop_training signal from all splits
+                stop_training &= self._optimize(split_number, e)
+            # early stopping
             if stop_training:
                 return
 
-    def _encode_one_hot(self, labels: np.ndarray) -> np.ndarray:
+    @staticmethod
+    def _encode_one_hot(labels: np.ndarray, n_classes: int) -> np.ndarray:
         """
         The label vector to encode
+
+        Args:
+            labels: The labels to convert in a 1d array
+            n_classes: The number of classes
 
         Returns:
             (n x n_classes) numpy array
         """
-        one_hot = np.zeros((len(labels), self.n_classes), dtype=int)
+        one_hot = np.zeros((len(labels), n_classes), dtype=int)
         one_hot[np.arange(labels.size), labels] = 1
-        assert (len(labels), self.n_classes) == one_hot.shape
+        assert (len(labels), n_classes) == one_hot.shape
         assert np.all(one_hot.sum(axis=1) == 1)
         return one_hot
 
-    def optimize(self, split_number: int, epoch: int):
+    def _optimize(self, split_number: int, epoch: int):
         """
         Optimizes the specific weights for a split.
 
@@ -221,16 +224,16 @@ class Regression(ABC):
         weights = self.weights[split_number]
 
         # convert the labels into one hot encodings
-        one_hot_enc_train_label = self._encode_one_hot(train_label)
-        one_hot_enc_val_label = self._encode_one_hot(val_label)
+        one_hot_enc_train_label = self._encode_one_hot(train_label, self.n_classes)
+        one_hot_enc_val_label = self._encode_one_hot(val_label, self.n_classes)
 
         # weight update
         grad = self._grad(weights, train_data, one_hot_enc_train_label)
         weights[:, :] = weights + self.lr * grad
 
         # calculate the training/validation loss and accuracy
-        train_loss, train_accuracy = self.loss_and_accuracy(weights, train_data, one_hot_enc_train_label)
-        val_loss, val_accuracy = self.loss_and_accuracy(weights, val_data, one_hot_enc_val_label)
+        train_loss, train_accuracy = self.loss_and_accuracy(weights, train_data, train_label)
+        val_loss, val_accuracy = self.loss_and_accuracy(weights, val_data, val_label)
 
         # record training, val loss and accuracy
         self.overall_train_loss[split_number, epoch] = train_loss
@@ -343,7 +346,7 @@ class Regression(ABC):
         """
         y = softmax(weights @ data.T)
         update = (label.T - y) @ data
-        update /= (self.n_classes * len(data))
+        update /= len(data)
         return update
 
     def loss_and_accuracy(self, weights: np.ndarray, data, label) -> (float, float):
@@ -359,13 +362,9 @@ class Regression(ABC):
             (loss, accuracy): The loss and accuracy of the model
         """
         predicted, log_y = self._classify(data, weights)
-
-        predicted_one_hot = self._encode_one_hot(predicted)
-
-        n_correct = np.sum(np.sum(predicted_one_hot == label, axis=1) == self.n_classes)
-        accuracy = n_correct / len(log_y)
-
-        loss = -np.sum(label.T * log_y) / (self.n_classes * len(data))
+        accuracy = np.sum(predicted == label) / len(label)
+        one_hot_label = self._encode_one_hot(label, self.n_classes)
+        loss = -np.sum(one_hot_label.T * log_y) / len(data)
         return loss, accuracy
 
     def classify(self, data):
