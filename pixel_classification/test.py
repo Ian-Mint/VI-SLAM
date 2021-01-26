@@ -100,7 +100,7 @@ class TestPixelClassifier(unittest.TestCase):
         x = read_pixels(folder)
         y = self.classifier.classify(x)
 
-        self.assertGreater(sum(y == 1) / len(y), 0.5)
+        self.assertGreater(sum(y == 3) / len(y), 0.5)
 
     def test_green_precision_is_above_50(self):
         folder = 'data/training/green'
@@ -114,7 +114,7 @@ class TestPixelClassifier(unittest.TestCase):
         x = read_pixels(folder)
         y = self.classifier.classify(x)
 
-        self.assertGreater(sum(y == 3) / len(y), 0.5)
+        self.assertGreater(sum(y == 1) / len(y), 0.5)
 
 
 if __name__ == '__main__':

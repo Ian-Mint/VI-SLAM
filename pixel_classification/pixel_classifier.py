@@ -5,10 +5,6 @@ import pickle
 
 from regression import Regression
 
-BLUE_DIR = 'data/training/blue'
-GREEN_DIR = 'data/training/green'
-RED_DIR = 'data/training/red'
-
 
 class PixelClassifier:
     def __init__(self):

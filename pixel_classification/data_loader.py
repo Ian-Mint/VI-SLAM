@@ -5,11 +5,11 @@ from typing import List, Tuple
 
 from pixel_classification.generate_rgb_data import read_pixels
 
-CLASSES = ('blue', 'green', 'red')
+CLASSES = ('red', 'green', 'blue')
 Classes = namedtuple('ClassDirs', CLASSES)
 
-TRAIN_DIRS = Classes('data/training/blue', 'data/training/green', 'data/training/red')
-VAL_DIRS = Classes('data/validation/blue', 'data/validation/green', 'data/validation/red')
+TRAIN_DIRS = Classes('data/training/red', 'data/training/green', 'data/training/blue')
+VAL_DIRS = Classes('data/validation/red', 'data/validation/green', 'data/validation/blue')
 
 
 class DataLoader:

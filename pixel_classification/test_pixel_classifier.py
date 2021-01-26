@@ -17,7 +17,7 @@ if __name__ == '__main__':
   myPixelClassifier = PixelClassifier()
   y = myPixelClassifier.classify(X)
   
-  print('Precision: %f' % (sum(y==1)/y.shape[0]))
+  print('Precision: %f' % (sum(y==3)/y.shape[0]))
 
   folder = 'pixel_classification/data/validation/green'
 
@@ -33,6 +33,6 @@ if __name__ == '__main__':
   myPixelClassifier = PixelClassifier()
   y = myPixelClassifier.classify(X)
 
-  print('Precision: %f' % (sum(y==3)/y.shape[0]))
+  print('Precision: %f' % (sum(y==1)/y.shape[0]))
 
   
