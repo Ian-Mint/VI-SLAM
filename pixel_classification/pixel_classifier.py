@@ -2,9 +2,7 @@
 ECE276A WI21 PR1: Color Classification and Recycling Bin Detection
 """
 
-import numpy as np
-
-from data_loader import DataLoader
+from pixel_classification.data_loader import DataLoader
 from regression import Regression
 
 BLUE_DIR = 'data/training/blue'
