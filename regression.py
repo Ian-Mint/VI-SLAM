@@ -1,6 +1,5 @@
 from typing import Tuple, List
 
-import matplotlib.pyplot as plt
 import numpy as np
 
 VALIDATION = 'validation'
@@ -257,6 +256,8 @@ class Regression:
         Returns:
             None
         """
+        import matplotlib.pyplot as plt  # so that we don't have dependency issues in the autograder
+
         train_loss_matrix = self.overall_train_loss
         val_loss_matrix = self.overall_val_loss
         train_accuracy_matrix = self.overall_train_accuracy
