@@ -11,12 +11,28 @@ from pixel_classifier import PixelClassifier
 if __name__ == '__main__':
   # test the classifier
   
-  folder = 'data/validation/green'
+  folder = 'data/validation/blue'
   
   X = read_pixels(folder)
   myPixelClassifier = PixelClassifier()
   y = myPixelClassifier.classify(X)
   
   print('Precision: %f' % (sum(y==1)/y.shape[0]))
+
+  folder = 'data/validation/green'
+
+  X = read_pixels(folder)
+  myPixelClassifier = PixelClassifier()
+  y = myPixelClassifier.classify(X)
+
+  print('Precision: %f' % (sum(y==2)/y.shape[0]))
+
+  folder = 'data/validation/red'
+
+  X = read_pixels(folder)
+  myPixelClassifier = PixelClassifier()
+  y = myPixelClassifier.classify(X)
+
+  print('Precision: %f' % (sum(y==3)/y.shape[0]))
 
   

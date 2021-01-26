@@ -1,3 +1,4 @@
+import pickle
 from typing import Tuple, List
 
 import numpy as np
@@ -87,6 +88,14 @@ class Regression:
             np.zeros((self.n_classes, self.data_dim)) for _ in range(self.n_splits)
         ]
         self.min_loss: List[float] = [np.inf] * self.n_splits
+
+    def dump_best_weights(self, filename: str):
+        with open(filename, 'wb') as f:
+            pickle.dump(self.best_weights, f)
+
+    def load_best_weights(self, filename: str):
+        with open(filename, 'rb') as f:
+            self.best_weights = pickle.load(f)
 
     @staticmethod
     def _validate_labels(label_splits) -> int:
@@ -362,29 +371,14 @@ class Regression:
         Returns:
             (loss, accuracy): The loss and accuracy of the model
         """
-        predicted, log_y = self._classify(data, weights)
+        predicted, log_y = self.classify(data, weights)
         accuracy = np.sum(predicted == label) / len(label)
         one_hot_label = self._encode_one_hot(label, self.n_classes)
         loss = -np.sum(one_hot_label.T * log_y) / len(data)
         return loss, accuracy
 
-    def classify(self, data):
-        """
-        Classify the data
-
-        Args:
-            data: (n x d) data to classify
-
-        Returns:
-            predicted labels
-        """
-        if self.cv:
-            raise ValueError("Classification does not work with cross-validation")
-        return self._classify(data, self.best_weights[0])[0]
-        # return self._classify(data, self.weights[0])[0]
-
     @staticmethod
-    def _classify(data: np.ndarray, weights: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+    def classify(data: np.ndarray, weights: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
         """
         Classifies the data given the weights
 
