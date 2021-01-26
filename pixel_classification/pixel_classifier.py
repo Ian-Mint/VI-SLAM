@@ -3,8 +3,6 @@ ECE276A WI21 PR1: Color Classification and Recycling Bin Detection
 """
 import pickle
 
-from pixel_classification.data_loader import DataLoader
-from pixel_classification.train import WEIGHTS_FILE
 from regression import Regression
 
 BLUE_DIR = 'data/training/blue'
@@ -17,7 +15,7 @@ class PixelClassifier:
         """
         Initialize your classifier with any parameters and attributes you need
         """
-        with open(WEIGHTS_FILE, 'rb') as f:
+        with open('pixel_classification/weights.pkl', 'rb') as f:
             self.weights = pickle.load(f)[0]
 
     def classify(self, X):

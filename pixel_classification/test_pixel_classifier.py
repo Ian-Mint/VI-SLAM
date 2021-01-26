@@ -11,7 +11,7 @@ from pixel_classifier import PixelClassifier
 if __name__ == '__main__':
   # test the classifier
   
-  folder = 'data/validation/blue'
+  folder = 'pixel_classification/data/validation/blue'
   
   X = read_pixels(folder)
   myPixelClassifier = PixelClassifier()
@@ -19,7 +19,7 @@ if __name__ == '__main__':
   
   print('Precision: %f' % (sum(y==1)/y.shape[0]))
 
-  folder = 'data/validation/green'
+  folder = 'pixel_classification/data/validation/green'
 
   X = read_pixels(folder)
   myPixelClassifier = PixelClassifier()
@@ -27,7 +27,7 @@ if __name__ == '__main__':
 
   print('Precision: %f' % (sum(y==2)/y.shape[0]))
 
-  folder = 'data/validation/red'
+  folder = 'pixel_classification/data/validation/red'
 
   X = read_pixels(folder)
   myPixelClassifier = PixelClassifier()
