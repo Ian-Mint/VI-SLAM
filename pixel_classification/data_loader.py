@@ -3,7 +3,7 @@ from collections import namedtuple
 import numpy as np
 from typing import List, Tuple
 
-from generate_rgb_data import read_pixels
+from pixel_classification.generate_rgb_data import read_pixels
 
 CLASSES = ('blue', 'green', 'red')
 Classes = namedtuple('ClassDirs', CLASSES)
