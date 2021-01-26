@@ -156,7 +156,7 @@ class Regression:
         """
         Method for returning data split or label split
         """
-        if self.n_splits >= 2:
+        if self.cv:
             if split_type == TRAIN:
                 split_list = rotate(split_list, i)
                 split = np.concatenate(split_list[0:-1], axis=0)
@@ -225,15 +225,14 @@ class Regression:
 
         # convert the labels into one hot encodings
         one_hot_enc_train_label = self._encode_one_hot(train_label, self.n_classes)
-        one_hot_enc_val_label = self._encode_one_hot(val_label, self.n_classes)
 
         # weight update
         grad = self._grad(weights, train_data, one_hot_enc_train_label)
         weights[:, :] = weights + self.lr * grad
 
         # calculate the training/validation loss and accuracy
-        train_loss, train_accuracy = self.loss_and_accuracy(weights, train_data, train_label)
-        val_loss, val_accuracy = self.loss_and_accuracy(weights, val_data, val_label)
+        train_loss, train_accuracy = self._loss_and_accuracy(weights, train_data, train_label)
+        val_loss, val_accuracy = self._loss_and_accuracy(weights, val_data, val_label)
 
         # record training, val loss and accuracy
         self.overall_train_loss[split_number, epoch] = train_loss
@@ -323,7 +322,8 @@ class Regression:
         plt.title('Softmax Regression Accuracy')
         plt.show()
 
-    def _grad(self, weights: np.ndarray, data, label) -> np.ndarray:
+    @staticmethod
+    def _grad(weights: np.ndarray, data, label) -> np.ndarray:
         """
         Calculate the negative gradient of the softmax with cross-entropy loss
 
@@ -349,7 +349,7 @@ class Regression:
         update /= len(data)
         return update
 
-    def loss_and_accuracy(self, weights: np.ndarray, data, label) -> (float, float):
+    def _loss_and_accuracy(self, weights: np.ndarray, data, label) -> (float, float):
         """
         Get the accuracy and loss based on the weights, data, and labels provided
 
@@ -380,6 +380,7 @@ class Regression:
         if self.cv:
             raise ValueError("Classification does not work with cross-validation")
         return self._classify(data, self.best_weights[0])[0]
+        # return self._classify(data, self.weights[0])[0]
 
     @staticmethod
     def _classify(data: np.ndarray, weights: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
