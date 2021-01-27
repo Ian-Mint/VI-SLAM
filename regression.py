@@ -38,7 +38,7 @@ def sigmoid(x: np.ndarray) -> np.ndarray:
 def softmax(x):
     x_exp = np.exp(x)
     y = x_exp / np.sum(x_exp, axis=0)
-    assert np.all(np.isclose(np.sum(y, axis=0), 1))
+    assert np.all(np.isclose(np.sum(y, axis=0), 1)), print(x)
     return y
 
 
@@ -63,7 +63,7 @@ class Regression:
         self.n_classes = self._validate_labels(label_splits)
         assert self.n_classes >= 2
 
-        self.data_dim = 3
+        self.data_dim = data_splits[0].shape[1]
         self.lr = learning_rate
         assert len(data_splits) == len(label_splits)
         assert len(data_splits) >= 2
@@ -114,14 +114,13 @@ class Regression:
         """
         Returns a list of gaussian initialized weight vectors.
         """
-        n_classes = self.n_classes
-        train_split_length = len(self.data_splits[0]) * self.n_splits
-        initializer_scale = 1 / train_split_length
+        data_dim = self.data_dim
+        initializer_scale = 1e-2 / data_dim
 
-        mean = np.zeros(n_classes)
-        cov = initializer_scale * np.identity(n_classes)
+        mean = np.zeros(data_dim)
+        cov = initializer_scale * np.identity(data_dim)
         weights = [
-            np.random.multivariate_normal(mean, cov, size=self.data_dim)
+            np.random.multivariate_normal(mean, cov, size=self.n_classes)
             for _ in range(self.n_splits)
         ]
         return weights
@@ -190,8 +189,8 @@ class Regression:
             for split_number in range(self.n_splits):
                 stop_training &= self._optimize(split_number, e)
             # early stopping
-            if stop_training:
-                return
+            # if stop_training:
+            #     return
 
     @staticmethod
     def _encode_one_hot(labels: np.ndarray, n_classes: int) -> np.ndarray:

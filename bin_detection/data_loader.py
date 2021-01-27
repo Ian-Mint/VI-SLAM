@@ -5,16 +5,13 @@ import cv2
 import numpy as np
 import skimage.transform
 
-DATA_DIR = 'data/training'
-MASK_DIR = 'data/masks/training'
-
 
 class DataLoader:
-    def __init__(self, data_dir=DATA_DIR, mask_dir=MASK_DIR):
+    def __init__(self, data_dir: str, mask_dir: str):
         data = []
         labels = []
 
-        for img_file in os.listdir(DATA_DIR):
+        for img_file in os.listdir(data_dir):
             mask_path = os.path.join(os.path.abspath(os.curdir), mask_dir, f'{img_file}_mask.pkl')
 
             img_path = os.path.join(os.path.abspath(os.curdir), data_dir, img_file)
@@ -25,9 +22,26 @@ class DataLoader:
             data.append(img.reshape((np.prod(self.img_shape), 3)))
 
             with open(mask_path, 'rb') as f:
-                mask = pickle.load(f)
-            mask = skimage.transform.resize(mask, self.img_shape) > 0.5
+                mask: np.ndarray = pickle.load(f)
+            mask = skimage.transform.resize(mask, self.img_shape).astype(int)
             labels.append(mask.flatten())
 
         self.data = np.concatenate(data, axis=0)
         self.labels = np.concatenate(labels, axis=0)
+
+        self.mean = self.data.mean(axis=0)
+        self.std = self.data.std(axis=0)
+
+        self.data = self.normalize(self.data)
+
+    def normalize(self, data: np.ndarray):
+        """
+        Normalize according to the mean and standard deviation of this data.
+        Args:
+            data:
+
+        Returns:
+
+        """
+        data = (data - self.mean) / self.std
+        return data
