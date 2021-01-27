@@ -6,7 +6,7 @@ import numpy as np
 import skimage.transform
 
 DATA_DIR = 'data/training'
-MASK_DIR = 'data/masks/blue'
+MASK_DIR = 'data/masks/training'
 
 
 class DataLoader:
