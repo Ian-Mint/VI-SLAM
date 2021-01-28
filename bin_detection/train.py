@@ -1,23 +1,8 @@
-from bin_detection.data_loader import DataLoader
-from regression import Regression
-
-TRAIN_DATA_DIR = 'data/training'
-TRAIN_MASK_DIR = 'data/masks/training'
-
-VAL_DATA_DIR = 'data/validation'
-VAL_MASK_DIR = 'data/masks/validation'
+from bin_detection.common import *
 
 if __name__ == '__main__':
-    train_data = DataLoader(TRAIN_DATA_DIR, TRAIN_MASK_DIR)
     train_data.normalize(train_data.data)
 
-    learner = Regression(
-        [train_data.data],
-        [train_data.labels],
-        learning_rate=1,
-        epochs=100,
-        cross_validation=False,
-    )
-    learner.train()
-    learner.create_plots()
-    learner.dump_best_weights('weights.pkl')
+    classifier.train()
+    classifier.create_plots()
+    classifier.dump_best_weights('weights.pkl')

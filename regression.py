@@ -189,8 +189,8 @@ class Regression:
             for split_number in range(self.n_splits):
                 stop_training &= self._optimize(split_number, e)
             # early stopping
-            # if stop_training:
-            #     return
+            if stop_training:
+                return
 
     @staticmethod
     def _encode_one_hot(labels: np.ndarray, n_classes: int) -> np.ndarray:
@@ -380,8 +380,7 @@ class Regression:
         loss = -np.sum(one_hot_label.T * log_y) / len(data)
         return loss, accuracy
 
-    @staticmethod
-    def classify(data: np.ndarray, weights: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+    def classify(self, data: np.ndarray, weights: np.ndarray = None) -> Tuple[np.ndarray, np.ndarray]:
         """
         Classifies the data given the weights
 
@@ -392,6 +391,9 @@ class Regression:
         Returns:
             predicted labels, log of the softmax
         """
+        if weights is None:
+            weights = self.best_weights[0]
+
         y = softmax(weights @ data.T)
         predicted = y.argmax(axis=0)
         log_y = np.log(y)
