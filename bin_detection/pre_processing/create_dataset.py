@@ -6,7 +6,7 @@ import cv2
 from bin_detection.roipoly import RoiPoly
 from matplotlib import pyplot as plt
 
-DATA_DIR = 'data/validation'
+DATA_DIR = 'data/training'
 
 if __name__ == '__main__':
     mask_list = []
@@ -22,7 +22,7 @@ if __name__ == '__main__':
         ax.imshow(img)
         roi = RoiPoly(fig=fig, ax=ax, color='r')
         mask = roi.get_mask(img)
-        with open(f'data/masks/validation/{fn}_mask.pkl', 'wb') as f:
+        with open(f'data/masks/training/green/{fn}_mask.pkl', 'wb') as f:
             pickle.dump(mask, f)
         mask_list.append(mask)
 
