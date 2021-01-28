@@ -9,11 +9,11 @@ VAL_MASK_DIR = 'data/masks/validation'
 
 if __name__ == '__main__':
     train_data = DataLoader(TRAIN_DATA_DIR, TRAIN_MASK_DIR)
-    val_data = DataLoader(VAL_DATA_DIR, VAL_MASK_DIR)
+    train_data.normalize(train_data.data)
 
     learner = Regression(
-        [train_data.data, val_data.data],
-        [train_data.labels, val_data.labels],
+        [train_data.data],
+        [train_data.labels],
         learning_rate=1,
         epochs=100,
         cross_validation=False,

@@ -66,9 +66,9 @@ class Regression:
         self.data_dim = data_splits[0].shape[1]
         self.lr = learning_rate
         assert len(data_splits) == len(label_splits)
-        assert len(data_splits) >= 2
         self.n_splits = len(data_splits) if cross_validation else 1
         self.epochs = epochs
+        self.validation = len(data_splits) >= 2
 
         self.label_splits = label_splits
         self.data_splits = data_splits
@@ -224,8 +224,9 @@ class Regression:
         """
         train_data = self.get_data_split(split_number, TRAIN)
         train_label = self.get_label_split(split_number, TRAIN)
-        val_data = self.get_data_split(split_number, VALIDATION)
-        val_label = self.get_label_split(split_number, VALIDATION)
+        if self.validation:
+            val_data = self.get_data_split(split_number, VALIDATION)
+            val_label = self.get_label_split(split_number, VALIDATION)
 
         # Get the weights
         weights = self.weights[split_number]
@@ -237,23 +238,26 @@ class Regression:
         grad = self._grad(weights, train_data, one_hot_enc_train_label)
         weights[:, :] = weights + self.lr * grad
 
-        # calculate the training/validation loss and accuracy
+        # update stats
         train_loss, train_accuracy = self._loss_and_accuracy(weights, train_data, train_label)
-        val_loss, val_accuracy = self._loss_and_accuracy(weights, val_data, val_label)
-
-        # record training, val loss and accuracy
         self.overall_train_loss[split_number, epoch] = train_loss
-        self.overall_val_loss[split_number, epoch] = val_loss
         self.overall_train_accuracy[split_number, epoch] = train_accuracy
-        self.overall_val_accuracy[split_number, epoch] = val_accuracy
 
-        if val_loss < self.min_loss[split_number]:
-            self.min_loss[split_number] = val_loss
-            self.best_weights[split_number][:, :] = weights
-            self.min_epoch = epoch
+        if self.validation:
+            val_loss, val_accuracy = self._loss_and_accuracy(weights, val_data, val_label)
+            self.overall_val_loss[split_number, epoch] = val_loss
+            self.overall_val_accuracy[split_number, epoch] = val_accuracy
 
-        if epoch - self.min_epoch > 10:
-            return STOP_TRAINING
+        if self.validation:
+            if val_loss < self.min_loss[split_number]:
+                self.min_loss[split_number] = val_loss
+                self.best_weights[split_number][:, :] = weights
+                self.min_epoch = epoch
+
+            if epoch - self.min_epoch > 10:
+                return STOP_TRAINING
+            else:
+                return not STOP_TRAINING
         else:
             return not STOP_TRAINING
 
