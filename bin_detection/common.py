@@ -7,6 +7,7 @@ VAL_DATA_DIR = 'data/validation'
 VAL_MASK_DIR = 'data/masks/validation'
 
 train_data = DataLoader(TRAIN_DATA_DIR, TRAIN_MASK_DIR)
+train_data.dump_stats()
 classifier = Regression(
     [train_data.data],
     [train_data.labels],
