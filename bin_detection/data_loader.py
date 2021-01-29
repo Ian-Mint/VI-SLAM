@@ -15,7 +15,6 @@ class DataLoader:
         self.img_shape = (100, 100)
 
         data = []
-        labels = []
 
         for img_file in os.listdir(data_dir):
             data.append([])

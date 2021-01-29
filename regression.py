@@ -1,4 +1,5 @@
 import pickle
+from collections import Counter
 from typing import Tuple, List
 
 import numpy as np
@@ -89,13 +90,14 @@ class Regression:
         ]
         self.min_loss: List[float] = [np.inf] * self.n_splits
 
-    def dump_best_weights(self, filename: str):
+    def dump_weights(self, filename: str):
         with open(filename, 'wb') as f:
-            pickle.dump(self.best_weights, f)
+            pickle.dump(self.weights, f)
 
-    def load_best_weights(self, filename: str):
+    def load_weights(self, filename: str):
         with open(filename, 'rb') as f:
-            self.best_weights = pickle.load(f)
+            self.weights = pickle.load(f)
+        self.best_weights = self.weights
 
     @staticmethod
     def _validate_labels(label_splits) -> int:
@@ -392,9 +394,10 @@ class Regression:
             predicted labels, log of the softmax
         """
         if weights is None:
-            weights = self.best_weights[0]
+            weights = self.weights[0]
 
         y = softmax(weights @ data.T)
         predicted = y.argmax(axis=0)
+        print(Counter(predicted))
         log_y = np.log(y)
         return predicted, log_y

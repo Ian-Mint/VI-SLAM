@@ -5,4 +5,4 @@ if __name__ == '__main__':
 
     classifier.train()
     classifier.create_plots()
-    classifier.dump_best_weights('weights.pkl')
+    classifier.dump_weights('weights.pkl')

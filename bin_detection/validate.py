@@ -7,7 +7,7 @@ from common import *
 if __name__ == '__main__':
     train_data.normalize(train_data.data)
 
-    classifier.load_best_weights('weights.pkl')
+    classifier.load_weights('weights.pkl')
 
     for img_file in os.listdir(VAL_DATA_DIR):
         img = DataLoader.load_img(VAL_DATA_DIR, img_file)
