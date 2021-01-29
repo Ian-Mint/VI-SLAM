@@ -98,6 +98,7 @@ class Regression:
         with open(filename, 'rb') as f:
             self.weights = pickle.load(f)
         self.best_weights = self.weights
+        return self.weights
 
     @staticmethod
     def _validate_labels(label_splits) -> int:
@@ -382,7 +383,8 @@ class Regression:
         loss = -np.sum(one_hot_label.T * log_y) / len(data)
         return loss, accuracy
 
-    def classify(self, data: np.ndarray, weights: np.ndarray = None) -> Tuple[np.ndarray, np.ndarray]:
+    @staticmethod
+    def classify(data: np.ndarray, weights: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
         """
         Classifies the data given the weights
 
@@ -393,9 +395,6 @@ class Regression:
         Returns:
             predicted labels, log of the softmax
         """
-        if weights is None:
-            weights = self.weights[0]
-
         y = softmax(weights @ data.T)
         predicted = y.argmax(axis=0)
         print(Counter(predicted))

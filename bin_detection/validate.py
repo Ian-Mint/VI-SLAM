@@ -7,7 +7,7 @@ from common import *
 if __name__ == '__main__':
     train_data.normalize(train_data.data)
 
-    classifier.load_weights('weights.pkl')
+    weights = classifier.load_weights('weights.pkl')
 
     for img_file in os.listdir(VAL_DATA_DIR):
         img = DataLoader.load_img(VAL_DATA_DIR, img_file)
@@ -15,7 +15,7 @@ if __name__ == '__main__':
         img = img.reshape((img.shape[0] * img.shape[1], img.shape[2])).astype(float)
         train_data.normalize(img)
 
-        mask = classifier.classify(img)[0]
+        mask = classifier.classify(img, weights)[0]
         mask = mask.reshape((shape[0], shape[1]))
         img = train_data.unnormalize(img)
         img = img.reshape(shape)

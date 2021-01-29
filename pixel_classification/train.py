@@ -10,4 +10,4 @@ if __name__ == '__main__':
     learner = Regression(data, labels, learning_rate=10, epochs=5000, cross_validation=False)
     learner.train()
     learner.create_plots()
-    learner.dump_best_weights(WEIGHTS_FILE)
+    learner.dump_weights(WEIGHTS_FILE)
