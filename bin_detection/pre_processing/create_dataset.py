@@ -10,7 +10,6 @@ DATA_DIR = 'data/training'
 
 if __name__ == '__main__':
     mask_list = []
-    # for fn in os.listdir(DATA_DIR):
     for fn in os.listdir(DATA_DIR):
         if fn.endswith('.txt'):
             continue
@@ -22,7 +21,7 @@ if __name__ == '__main__':
         ax.imshow(img)
         roi = RoiPoly(fig=fig, ax=ax, color='r')
         mask = roi.get_mask(img)
-        with open(f'data/masks/training/green/{fn}_mask.pkl', 'wb') as f:
+        with open(f'data/masks/training/black/{fn}_mask.pkl', 'wb') as f:
             pickle.dump(mask, f)
         mask_list.append(mask)
 

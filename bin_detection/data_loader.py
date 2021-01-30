@@ -13,7 +13,7 @@ classes = ('blue', 'black', 'green', 'not-blue', 'white')
 class DataLoader:
     def __init__(self, data_dir: str, mask_dir: str, resample=True, load=True):
         if load:
-            self.img_shape = (100, 100)
+            self.img_shape = (200, 200)
 
             data = []
 

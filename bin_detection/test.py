@@ -58,11 +58,11 @@ class TestBinDetection(unittest.TestCase):
                 self.assertIsInstance(element, int)
         self.plot(img, mask, bounding_boxes)
 
+    @unittest.skip
     def test_bound_bin_on_validation(self):
         for img in self.val_images:
             self.bounding_box_test(img)
 
-    @unittest.skip
     def test_bound_bin_on_test(self):
         for img in self.train_images:
             self.bounding_box_test(img)
