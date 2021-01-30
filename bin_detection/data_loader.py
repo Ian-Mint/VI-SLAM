@@ -96,7 +96,6 @@ class DataLoader:
     def load_img(data_dir, img_file):
         img_path = os.path.join(os.path.abspath(os.curdir), data_dir, img_file)
         img = cv2.imread(img_path)
-        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
         return img
 
     def normalize(self, data: np.ndarray) -> np.ndarray:

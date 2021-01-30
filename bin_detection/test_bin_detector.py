@@ -23,6 +23,8 @@ def get_rect(box: List[int], color):
 
 
 def plot(img: Union[np.ndarray, int], mask: np.ndarray, estimated_boxes: List[List[int]], true_boxes: List[List[int]]):
+  img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+
   fig, axs = plt.subplots(1, 2)
   axs[0].imshow(img)
   axs[1].imshow(mask)
@@ -82,9 +84,6 @@ if __name__ == '__main__':
       # load ground truth label
       with open(os.path.join(label_dir, os.path.splitext(filename)[0] + '.txt'), 'r') as stream:
         true_boxes = yaml.safe_load(stream)
-      
-      # convert from BGR (opencv convention) to RGB (everyone's convention)
-      img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
 
       # segment the image
       mask_img = my_detector.segment_image(img)

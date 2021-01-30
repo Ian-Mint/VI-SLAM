@@ -58,16 +58,18 @@ class TestBinDetection(unittest.TestCase):
                 self.assertIsInstance(element, int)
         self.plot(img, mask, bounding_boxes)
 
-    @unittest.skip
     def test_bound_bin_on_validation(self):
         for img in self.val_images:
             self.bounding_box_test(img)
 
+    @unittest.skip
     def test_bound_bin_on_test(self):
         for img in self.train_images:
             self.bounding_box_test(img)
 
     def plot(self, img: Union[np.ndarray, int], mask: np.ndarray, bounding_boxes: List[List[int]]):
+        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+
         fig, axs = plt.subplots(1, 2)
         axs[0].imshow(img)
         axs[1].imshow(mask)

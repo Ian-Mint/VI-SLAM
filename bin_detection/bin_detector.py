@@ -38,6 +38,7 @@ class BinDetector:
         Returns:
             mask_img - a binary image with 1 if the pixel in the original image is blue and 0 otherwise
         """
+        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
         shape = img.shape
         img = img.reshape((img.shape[0] * img.shape[1], img.shape[2])).astype(float)
         self.data_loader.normalize(img)
