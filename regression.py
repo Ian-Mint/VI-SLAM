@@ -1,5 +1,4 @@
 import pickle
-from collections import Counter
 from typing import Tuple, List
 
 import numpy as np
@@ -397,6 +396,5 @@ class Regression:
         """
         y = softmax(weights @ data.T)
         predicted = y.argmax(axis=0)
-        print(Counter(predicted))
         log_y = np.log(y)
         return predicted, log_y

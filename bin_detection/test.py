@@ -40,22 +40,32 @@ class TestSegmentImages(unittest.TestCase):
 class TestBinDetection(unittest.TestCase):
     def setUp(self) -> None:
         self.bd = BinDetector()
-        self.images = [
+        self.val_images = [
             DataLoader.load_img(VAL_DATA_DIR, img_file) for img_file in os.listdir(VAL_DATA_DIR)
         ]
+        self.train_images = [
+            DataLoader.load_img(TRAIN_DATA_DIR, img_file) for img_file in os.listdir(TRAIN_DATA_DIR)
+        ]
 
-    def test_bound_bin(self):
-        for img in self.images:
-            mask = self.bd.segment_image(img)
-            bounding_boxes = self.bd.get_bounding_boxes(mask)
-            print(bounding_boxes)
-            self.assertIsInstance(bounding_boxes, list)
-            for box in bounding_boxes:
-                self.assertIsInstance(box, tuple)
-                for element in box:
-                    self.assertIsInstance(element, int)
+    def bounding_box_test(self, img):
+        mask = self.bd.segment_image(img)
+        bounding_boxes = self.bd.get_bounding_boxes(mask)
+        print(bounding_boxes)
+        self.assertIsInstance(bounding_boxes, list)
+        for box in bounding_boxes:
+            self.assertIsInstance(box, tuple)
+            for element in box:
+                self.assertIsInstance(element, int)
+        self.plot(img, mask, bounding_boxes)
 
-            self.plot(img, mask, bounding_boxes)
+    def test_bound_bin_on_validation(self):
+        for img in self.val_images:
+            self.bounding_box_test(img)
+
+    @unittest.skip
+    def test_bound_bin_on_test(self):
+        for img in self.train_images:
+            self.bounding_box_test(img)
 
     def plot(self, img: Union[np.ndarray, int], mask: np.ndarray, bounding_boxes: List[List[int]]):
         img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)

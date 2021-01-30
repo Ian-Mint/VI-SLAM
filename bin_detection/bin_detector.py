@@ -12,7 +12,7 @@ from regression import Regression
 from bin_detection.data_loader import DataLoader
 
 MAX_WIDTH_RATIO = 2.5
-MIN_WIDTH_RATIO = 1.2
+MIN_WIDTH_RATIO = 1
 MIN_AREA = 1000
 
 
@@ -58,11 +58,11 @@ class BinDetector:
             boxes - a list of lists of bounding boxes. Each nested list is a bounding box in the form of [x1, y1, x2, y2] 
             where (x1, y1) and (x2, y2) are the top left and bottom right coordinate respectively
         """
-        blur_kernel_size = (30, 30)
+        blur_kernel_size = (20, 20)
         img = cv2.blur(img.astype(float), blur_kernel_size) > 0.8
-        labeled = label(img, background=0, connectivity=2)
+        labeled = label(img, background=0, connectivity=1)
         props = regionprops(labeled)
-        self.plot(labeled)
+        # self.plot(labeled)
 
         bounding_boxes = []
         for p in props:
