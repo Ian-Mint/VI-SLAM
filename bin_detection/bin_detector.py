@@ -24,7 +24,7 @@ class BinDetector:
         """
         self.data_loader = DataLoader('', '', load=False)
         self.data_loader.load_stats()
-        with open('weights.pkl', 'rb') as f:
+        with open('bin_detection/weights.pkl', 'rb') as f:
             self.weights = pickle.load(f)[0]
 
     def segment_image(self, img):
