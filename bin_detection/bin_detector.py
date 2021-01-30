@@ -24,7 +24,7 @@ class BinDetector:
         """
         self.data_loader = DataLoader('', '', load=False)
         self.data_loader.load_stats()
-        with open('bin_detection/weights.pkl', 'rb') as f:
+        with open('weights.pkl', 'rb') as f:
             self.weights = pickle.load(f)[0]
 
     def segment_image(self, img):
@@ -75,7 +75,7 @@ class BinDetector:
                 continue
             else:
                 x1, y1, x2, y2 = p.bbox
-                bounding_boxes.append((y1, x1, y2, x2))
+                bounding_boxes.append([y1, x1, y2, x2])
         return bounding_boxes
 
     def plot(self, img):
