@@ -68,7 +68,6 @@ class TestBinDetection(unittest.TestCase):
             self.bounding_box_test(img)
 
     def plot(self, img: Union[np.ndarray, int], mask: np.ndarray, bounding_boxes: List[List[int]]):
-        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
         fig, axs = plt.subplots(1, 2)
         axs[0].imshow(img)
         axs[1].imshow(mask)
@@ -82,9 +81,9 @@ class TestBinDetection(unittest.TestCase):
 
     @staticmethod
     def get_rect(box: List[int]):
-        width = abs(box[1] - box[3])
-        height = abs(box[0] - box[2])
-        anchor = (box[1], box[2] - height)
+        height = abs(box[1] - box[3])
+        width = abs(box[0] - box[2])
+        anchor = (box[0], box[1])
         rect = patches.Rectangle(anchor, width, height, linewidth=1, edgecolor='r', facecolor='none')
         return rect
 

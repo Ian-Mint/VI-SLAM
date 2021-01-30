@@ -2,12 +2,41 @@
 ECE276A WI21 PR1: Color Classification and Recycling Bin Detection
 '''
 
-
-import os, cv2
-from bin_detector import BinDetector
+import os
 import yaml
+from typing import Union, List
 
+import cv2
+import numpy as np
 import matplotlib.pyplot as plt
+import matplotlib.patches as patches
+
+from bin_detector import BinDetector
+
+
+def get_rect(box: List[int], color):
+  height = abs(box[1] - box[3])
+  width = abs(box[0] - box[2])
+  anchor = (box[0], box[1])
+  rect = patches.Rectangle(anchor, width, height, linewidth=1, edgecolor=color, facecolor='none')
+  return rect
+
+
+def plot(img: Union[np.ndarray, int], mask: np.ndarray, estimated_boxes: List[List[int]], true_boxes: List[List[int]]):
+  fig, axs = plt.subplots(1, 2)
+  axs[0].imshow(img)
+  axs[1].imshow(mask)
+
+  for ax in axs:
+    for box in estimated_boxes:
+      rect = get_rect(box, 'r')
+      ax.add_patch(rect)
+    for box in true_boxes:
+      rect = get_rect(box, 'g')
+      ax.add_patch(rect)
+
+  plt.show()
+
 
 def iou(box1,box2):
   '''
@@ -54,13 +83,6 @@ if __name__ == '__main__':
       with open(os.path.join(label_dir, os.path.splitext(filename)[0] + '.txt'), 'r') as stream:
         true_boxes = yaml.safe_load(stream)
       
-      # show image
-      for box in true_boxes:
-        cv2.rectangle(img, (box[0], box[1]), (box[2], box[3]), (0,0,255), 2)
-      # cv2.imshow('image', img)
-      # cv2.waitKey(0)
-      # cv2.destroyAllWindows()
-
       # convert from BGR (opencv convention) to RGB (everyone's convention)
       img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
 
@@ -69,7 +91,9 @@ if __name__ == '__main__':
 
       # detect recycling bins
       estm_boxes = my_detector.get_bounding_boxes(mask_img)
-      
+
+      plot(img, mask_img, estm_boxes, true_boxes)
+
       # The autograder checks your answers to the functions segment_image() and get_bounding_box()
       
       # measure accuracy      
