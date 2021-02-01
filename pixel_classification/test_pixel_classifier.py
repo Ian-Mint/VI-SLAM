@@ -1,9 +1,12 @@
+#!/usr/bin/env python
 '''
 ECE276A WI21 PR1: Color Classification and Recycling Bin Detection
 '''
-
-
 from __future__ import division
+
+import os
+import sys
+sys.path.append(os.path.abspath(os.curdir))
 
 from generate_rgb_data import read_pixels
 from pixel_classifier import PixelClassifier

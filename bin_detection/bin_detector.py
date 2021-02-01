@@ -1,7 +1,12 @@
+#!/usr/bin/env python
 """
 ECE276A WI21 PR1: Color Classification and Recycling Bin Detection
 """
+import os
 import pickle
+from typing import List
+import sys
+sys.path.append(os.path.abspath(os.curdir))
 
 import cv2
 import matplotlib.pyplot as plt
@@ -58,11 +63,11 @@ class BinDetector:
             boxes - a list of lists of bounding boxes. Each nested list is a bounding box in the form of [x1, y1, x2, y2] 
             where (x1, y1) and (x2, y2) are the top left and bottom right coordinate respectively
         """
+        original = img.copy()
         blur_kernel_size = (20, 20)
         img = cv2.blur(img.astype(float), blur_kernel_size) > 0.8
         labeled = label(img, background=0, connectivity=1)
         props = regionprops(labeled)
-        # self.plot(labeled)
 
         bounding_boxes = []
         for p in props:
@@ -79,7 +84,9 @@ class BinDetector:
                 bounding_boxes.append([y1, x1, y2, x2])
         return bounding_boxes
 
-    def plot(self, img):
-        fig, axs = plt.subplots()
-        axs.imshow(img)
+    @staticmethod
+    def plot(images: List[np.ndarray]):
+        fig, axs = plt.subplots(1, len(images))
+        for img, ax in zip(images, axs):
+            ax.imshow(img)
         plt.show()

@@ -263,78 +263,36 @@ class Regression:
         else:
             return not STOP_TRAINING
 
-    def create_plots(self):
+    def plot(self) -> None:
         """
         Generate training and validation plots for loss and accuracy
-
-        Returns:
-            None
         """
         import matplotlib.pyplot as plt  # so that we don't have dependency issues in the autograder
 
-        train_loss_matrix = self.overall_train_loss
-        val_loss_matrix = self.overall_val_loss
-        train_accuracy_matrix = self.overall_train_accuracy
-        val_accuracy_matrix = self.overall_val_accuracy
+        avg_train_loss = np.average(self.overall_train_loss, axis=0)
+        avg_val_loss = np.average(self.overall_val_loss, axis=0)
+        avg_train_accuracy = np.average(self.overall_train_accuracy, axis=0)
+        avg_val_accuracy = np.average(self.overall_val_accuracy, axis=0)
 
-        avg_train_loss = np.average(train_loss_matrix, axis=0)
-        avg_val_loss = np.average(val_loss_matrix, axis=0)
-        avg_train_accuracy = np.average(train_accuracy_matrix, axis=0)
-        avg_val_accuracy = np.average(val_accuracy_matrix, axis=0)
+        blue_color = 'tab:blue'
+        fig, ax1 = plt.subplots(figsize=(4, 3))
+        ax1.set_xlabel('epochs')
+        ax1.set_ylabel('loss', color=blue_color)
+        ax1.tick_params(axis='y', labelcolor=blue_color)
+        ax1.plot(avg_train_loss, 'k-', label='Train')
+        # ax1.plot(avg_val_loss, 'k--', label='Validation')
+        # ax1.legend(loc='center right')
+        ax1.plot(avg_train_loss, '-', color=blue_color, label='Train')
+        # ax1.plot(avg_val_loss, '--', color=blue_color, label='Validation')
 
-        std_train_loss = np.std(train_loss_matrix, axis=0)
-        std_val_loss = np.std(val_loss_matrix, axis=0)
-        std_train_accuracy = np.std(train_accuracy_matrix, axis=0)
-        std_val_accuracy = np.std(val_accuracy_matrix, axis=0)
+        ax2 = ax1.twinx()
 
-        x_axis = [(i + 1) for i in range(self.epochs)]
+        orange_color = 'tab:orange'
+        ax2.set_ylabel('accuracy', color=orange_color)
+        ax2.tick_params(axis='y', labelcolor=orange_color)
+        ax2.plot(avg_train_accuracy, '-', color=orange_color, label='Train')
+        # ax2.plot(avg_val_accuracy, '--', color=orange_color, label='Validation')
 
-        error_bar_loss_train = []
-        error_bar_loss_val = []
-        error_bar_accuracy_train = []
-        error_bar_accuracy_val = []
-        for epoch in range(self.epochs):
-            if (epoch + 1) % 50 == 0:
-                error_bar_loss_train.append(std_train_loss[epoch])
-                error_bar_loss_val.append(std_val_loss[epoch])
-                error_bar_accuracy_train.append(std_train_accuracy[epoch])
-                error_bar_accuracy_val.append(std_val_accuracy[epoch])
-            else:
-                error_bar_loss_train.append(np.nan)
-                error_bar_loss_val.append(np.nan)
-                error_bar_accuracy_train.append(np.nan)
-                error_bar_accuracy_val.append(np.nan)
-
-        plt.errorbar(x_axis, avg_train_loss,
-                     yerr=error_bar_loss_train,
-                     fmt='b-',
-                     label="training")
-
-        plt.errorbar(x_axis, avg_val_loss,
-                     yerr=error_bar_loss_val,
-                     fmt='r-',
-                     label="validation")
-
-        plt.legend(loc="upper right")
-        plt.xlabel('epochs')
-        plt.ylabel('loss error')
-        plt.title('Softmax Regression Loss Error')
-        plt.show()
-
-        plt.errorbar(x_axis, avg_train_accuracy,
-                     yerr=error_bar_accuracy_train,
-                     fmt='b-',
-                     label="training")
-
-        plt.errorbar(x_axis, avg_val_accuracy,
-                     yerr=error_bar_accuracy_val,
-                     fmt='r-',
-                     label="validation")
-
-        plt.legend(loc="upper right")
-        plt.xlabel('epochs')
-        plt.ylabel('accuracy')
-        plt.title('Softmax Regression Accuracy')
         plt.show()
 
     @staticmethod

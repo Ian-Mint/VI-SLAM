@@ -8,8 +8,12 @@ from pixel_classification.generate_rgb_data import read_pixels
 CLASSES = ('red', 'green', 'blue')
 Classes = namedtuple('ClassDirs', CLASSES)
 
-TRAIN_DIRS = Classes('data/training/red', 'data/training/green', 'data/training/blue')
-VAL_DIRS = Classes('data/validation/red', 'data/validation/green', 'data/validation/blue')
+TRAIN_DIRS = Classes('pixel_classification/data/training/red',
+                     'pixel_classification/data/training/green',
+                     'pixel_classification/data/training/blue')
+VAL_DIRS = Classes('pixel_classification/data/validation/red',
+                   'pixel_classification/data/validation/green',
+                   'pixel_classification/data/validation/blue')
 
 
 class DataLoader:

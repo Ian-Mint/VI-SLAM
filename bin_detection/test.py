@@ -1,14 +1,17 @@
+#!/usr/bin/env python
 import os
+import sys
 import unittest
-from typing import Union, Tuple, List
+from typing import Union, List
+sys.path.append(os.path.abspath(os.curdir))
 
 import cv2
-import matplotlib.pyplot as plt
 import matplotlib.patches as patches
+import matplotlib.pyplot as plt
 import numpy as np
 
-from bin_detection.data_loader import DataLoader
 from bin_detection.bin_detector import BinDetector
+from bin_detection.data_loader import DataLoader
 
 TRAIN_DATA_DIR = 'bin_detection/data/training'
 TRAIN_MASK_DIR = 'bin_detection/data/masks/training'

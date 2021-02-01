@@ -1,4 +1,8 @@
+#!/usr/bin/env python
+import os
+import sys
 import unittest
+sys.path.append(os.path.abspath(os.curdir))
 
 import numpy as np
 
@@ -88,7 +92,7 @@ class TestRegression(unittest.TestCase):
 
     def test_debug(self):
         self.learner.train()
-        self.learner.create_plots()
+        self.learner.plot()
 
 
 class TestPixelClassifier(unittest.TestCase):
@@ -96,21 +100,21 @@ class TestPixelClassifier(unittest.TestCase):
         self.classifier = PixelClassifier()
 
     def test_blue_precision_is_above_50(self):
-        folder = 'data/training/blue'
+        folder = 'pixel_classification/data/training/blue'
         x = read_pixels(folder)
         y = self.classifier.classify(x)
 
         self.assertGreater(sum(y == 3) / len(y), 0.5)
 
     def test_green_precision_is_above_50(self):
-        folder = 'data/training/green'
+        folder = 'pixel_classification/data/training/green'
         x = read_pixels(folder)
         y = self.classifier.classify(x)
 
         self.assertGreater(sum(y == 2) / len(y), 0.5)
 
     def test_red_precision_is_above_50(self):
-        folder = 'data/training/red'
+        folder = 'pixel_classification/data/training/red'
         x = read_pixels(folder)
         y = self.classifier.classify(x)
 
