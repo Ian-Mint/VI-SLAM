@@ -90,6 +90,7 @@ if __name__ == '__main__':
 
       # detect recycling bins
       estm_boxes = my_detector.get_bounding_boxes(mask_img)
+      print(f'{filename}: {estm_boxes}')
 
       plot(img, mask_img, estm_boxes, true_boxes)
 
