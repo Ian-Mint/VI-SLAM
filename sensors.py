@@ -5,10 +5,40 @@ import numpy as np
 import pr2_utils as utils
 
 
+class Pose:
+    def __init__(self, rotation, position):
+        self.rotation = rotation
+        self.position = position
+
+    def transform(self, x):
+        """
+        multiplies by rotation and adds position
+        Args:
+            x: coordinates must be in last dimension
+
+        Returns:
+            transformed coordinates
+        """
+        return x @ self.rotation.T + self.position
+
+
 class Car:
     def __init__(self, n_particles):
         self.rotation = np.zeros((n_particles, 2, 2))
         self.position = np.zeros((n_particles, 2))
+        self.weights = np.ones((n_particles,)) / n_particles
+
+    @property
+    def pose(self) -> Pose:
+        """
+        Pose object for the particle with the largest weight
+
+        Returns:
+            a Pose object
+        """
+        idx = np.argmax(self.weights)
+        return Pose(self.rotation[idx], self.position[idx])
+
 
 class Lidar:
     """
@@ -29,8 +59,17 @@ class Lidar:
         body_xy_scans = self._pre_process()
         self.data = OrderedDict(zip(self.time, body_xy_scans))
 
-    def update(self, particles, car: Car):
-        pass
+    def update(self, timestamp, car: Car):
+        """
+        computes the measurement in the world frame, given the car object using only the particle with the largest
+        weight.
+        Args:
+            timestamp: a timestamp corresponding to a measurement
+            car: a Car object
+
+        Returns:
+
+        """
 
     def _pre_process(self) -> np.ndarray:
         """
@@ -50,6 +89,7 @@ class Lidar:
                                   [0.999999, -0.000419027, -0.00160026],
                                   [-0.00102038, 0.605169, -0.796097]])
         self.position = np.array([0.8349, -0.0126869, 1.76416])
+        self.pose = Pose(self.rotation, self.position)
 
         angles = np.linspace(-5, 185, self._scans.shape[1])
         x_scale = np.sin(angles)
@@ -62,7 +102,7 @@ class Lidar:
         y = self._scans * y_scale
 
         xyz_scan_sensor = np.stack([x, y, np.zeros_like(x)], axis=2)
-        xyz_scan_body = xyz_scan_sensor @ self.rotation.T + self.position
+        xyz_scan_body = self.pose.transform(xyz_scan_sensor)
 
         # verify broadcasting worked as expected
         assert np.allclose(self.rotation @ xyz_scan_sensor[0, 0] + self.position, xyz_scan_body[0, 0])
