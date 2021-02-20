@@ -2,3 +2,4 @@ __pycache__
 pixel_classification/data
 bin_detection/data
 bin_detection/data.bak*
+data
