@@ -1,10 +1,11 @@
-import pandas as pd
+from functools import lru_cache
+
 import cv2
-import numpy as np
 import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
 
 plt.ion()
-from mpl_toolkits.mplot3d import Axes3D
 import time
 
 
@@ -43,6 +44,7 @@ def compute_stereo():
     plt.show()
 
 
+@lru_cache()
 def read_data_from_csv(filename):
     """
     INPUT
