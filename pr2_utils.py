@@ -265,7 +265,7 @@ def show_lidar():
 
 
 if __name__ == '__main__':
-    compute_stereo()
-    show_lidar()
+    # compute_stereo()
+    # show_lidar()
     test_mapCorrelation()
-    test_bresenham2D()
+    # test_bresenham2D()

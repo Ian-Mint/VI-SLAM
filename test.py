@@ -50,8 +50,8 @@ class TestLidar(unittest.TestCase):
         self.assertEqual(self.lidar.time.ndim, 1)
 
     def test_rotation_matrix_is_consistent_with_rpy(self):
-        R = R_from_RPY(*self.lidar.rpy)
-        self.assertTrue(np.allclose(R, self.lidar.rotation))
+        R = R_from_RPY(*self.lidar._rpy)
+        self.assertTrue(np.allclose(R, self.lidar._rotation))
 
     def test_all_timestamps_unique(self):
         self.assertEqual(len(np.unique(self.lidar.time)), len(self.lidar.time))
