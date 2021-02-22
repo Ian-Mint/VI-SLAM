@@ -1,5 +1,6 @@
 from collections import OrderedDict
 
+import matplotlib.pyplot as plt
 import numpy as np
 
 import pr2_utils as utils
@@ -91,7 +92,7 @@ class Lidar:
         self.position = np.array([0.8349, -0.0126869, 1.76416])
         self.pose = Pose(self.rotation, self.position)
 
-        angles = np.linspace(-5, 185, self._scans.shape[1])
+        angles = np.deg2rad(np.linspace(-5, 185, self._scans.shape[1]))
         x_scale = np.sin(angles)
         y_scale = -np.cos(angles)
 
