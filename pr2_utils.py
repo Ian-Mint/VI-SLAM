@@ -3,6 +3,7 @@ from functools import lru_cache
 import cv2
 import matplotlib.pyplot as plt
 import numpy as np
+import numba
 import pandas as pd
 
 plt.ion()
@@ -71,8 +72,8 @@ def mapCorrelation(im, x_im, y_im, vp, xs, ys):
     OUTPUT
     c               sum of the cell values of all the positions hit by range sensor
     """
-    nx = im.shape[0]
-    ny = im.shape[1]
+    nx = im._shape[0]
+    ny = im._shape[1]
     xmin = x_im[0]
     xmax = x_im[-1]
     xresolution = (xmax - xmin) / (nx - 1)
@@ -94,6 +95,7 @@ def mapCorrelation(im, x_im, y_im, vp, xs, ys):
     return cpr
 
 
+@numba.njit()
 def bresenham2D(sx, sy, ex, ey):
     """
     Bresenham's ray tracing algorithm in 2D.
@@ -112,7 +114,7 @@ def bresenham2D(sx, sy, ex, ey):
         dx, dy = dy, dx  # swap
 
     if dy == 0:
-        q = np.zeros((dx + 1, 1))
+        q = np.zeros((dx + 1), dtype=np.int64)
     else:
         q = np.append(0, np.greater_equal(
             np.diff(np.mod(np.arange(np.floor(dx / 2), -dy * dx + np.floor(dx / 2) - 1, -dy), dx)), 0))
@@ -267,5 +269,5 @@ def show_lidar():
 if __name__ == '__main__':
     # compute_stereo()
     # show_lidar()
-    test_mapCorrelation()
-    # test_bresenham2D()
+    # test_mapCorrelation()
+    test_bresenham2D()

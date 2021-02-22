@@ -4,3 +4,5 @@ numpy
 pandas
 scipy
 scikit-image >= 0.14.0
+
+numba~=0.51.2
