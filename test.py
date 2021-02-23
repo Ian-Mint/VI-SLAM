@@ -69,7 +69,8 @@ class TestLidar(unittest.TestCase):
 class TestRunner(unittest.TestCase):
     def test_lidar_single_line(self):
         runner = self.run_lidar_single_line()
-        runner.map.show('test_lidar_single_line')
+        runner.map.show_likelihood('test_lidar_single_line - likelihood')
+        runner.map.show_map('test_lidar_single_line - map')
 
     @staticmethod
     @patch('sensors.Encoder')
@@ -87,8 +88,7 @@ class TestRunner(unittest.TestCase):
         runner.run()
         return runner
 
-
-
+    # @unittest.skip
     @patch('sensors.Encoder')
     @patch('sensors.Gyro')
     def test_lidar_time(self, MockEncoder, MockGyro):

@@ -201,27 +201,52 @@ class Car:
         return Pose(self.rotation, self.position)
 
 
-@numba.njit(parallel=True)
-def _negative_update(scan_cells, origin_cell, map_, decrement) -> None:
+@numba.njit(parallel=True, fastmath=True)
+def _negative_update(scan_cells, origin_cell, map_, decrement, lambda_min) -> None:
     """
     Decrement the likelihood of cells where no object was detected
 
     Args:
-        scan_cells:  Indices of cells where an object was detected
+        scan_cells: Indices of cells where an object was detected
         origin_cell: The origin of the trace rays (the vehicle location)
         map_: A 2d numpy array containing cell log-likelihoods
         decrement: How much to decrement each cell encountered during Bresenham trace
+        lambda_min: Clip log-likelihood below this value
     """
     # 0.002024s per iteration (241s total) without JIT (and without the inner for loop)
     # 0.001472s per iteration (172s total) with JIT
     # 0.000646s per iteration (81s total) parallelized with JIT (four cores)
-    ex, ey = origin_cell
+    sx, sy = origin_cell
     for i in numba.prange(len(scan_cells)):
-        sx, sy = scan_cells[i]
+        ex, ey = scan_cells[i]
         trace = utils.bresenham2D(sx, sy, ex, ey)
-        # The code below replaces the commented out line for numba compatibility
-        for tx, ty in trace:
+        # use a loop for numba compatibility
+        for tx, ty in trace[:-1]:  # the last element of trace is (ex, ey)
             map_[tx, ty] -= decrement
+            # clip minimum
+            if map_[tx, ty] < lambda_min:
+                map_[tx, ty] = lambda_min
+
+
+@numba.njit(parallel=True, fastmath=True)
+def _positive_update(scan_cells, map_, increment, lambda_max) -> None:
+    """
+    Increment the likelihood of cells where we detected an object
+    map_[scan_cells[:, 0], scan_cells[:, 1]] += increment
+
+    Args:
+        scan_cells: Indices of cells where an object was detected
+        map_: The map to be updated according to scan_cells
+        increment: How much to increment each cell by
+        lambda_max: The clipping limit
+    """
+    for i in numba.prange(len(scan_cells)):
+        x, y = scan_cells[i]
+        map_[x, y] += increment
+        # clip upper limit
+        if map_[x, y] > lambda_max:
+            map_[x, y] = lambda_max
+
 
 
 class Map:
@@ -230,10 +255,10 @@ class Map:
         self.resolution = resolution
         self._range = np.array([x_range, y_range])
 
-        self._increment = np.log(4)
+        self._increment = np.log(16)
         self._decrement = np.log(4)
         self._lambda_max = self._increment * lambda_max_factor
-        self._lambda_min = self._decrement * lambda_max_factor
+        self._lambda_min = -self._decrement * lambda_max_factor
         self._shape = np.array([int(np.ceil(np.diff(x_range) / resolution + 1)),
                                 int(np.ceil(np.diff(y_range)) / resolution + 1)])
         self._map = np.zeros(self._shape, dtype=np.float)
@@ -258,10 +283,26 @@ class Map:
         """y_min, y_max"""
         return self._range[1, :]
 
-    def show(self, title):
-        plt.imshow(self._map, cmap='gray')
+    @property
+    def likelihood(self):
+        return np.exp(self._map) / (1 + np.exp(self._map))
+
+    def show_likelihood(self, title):
+        plt.imshow(self.likelihood, cmap='gray')
         plt.title(title)
         plt.show()
+
+    def show_map(self, title):
+        plt.imshow(self.ml_map, cmap='gray')
+        plt.title(title)
+        plt.show()
+
+    @property
+    def ml_map(self):
+        ml_map = np.ones_like(self._map)
+        ml_map[self._map == 0] = 0.5
+        ml_map[self._map > 0] = 0
+        return ml_map
 
     @property
     def shape(self):
@@ -288,17 +329,8 @@ class Map:
         valid_scan_cells = scan_cells[scan_valid]
         assert valid_scan_cells.ndim == 2
 
-        self._positive_update(valid_scan_cells)
-        _negative_update(valid_scan_cells, origin_cell, self._map, self._decrement)
-
-    def _positive_update(self, scan_cells) -> None:
-        """
-        Increment the likelihood of cells where we detected an object
-        
-        Args:
-            scan_cells: Indices of cells where an object was detected
-        """
-        self._map[scan_cells[:, 0], scan_cells[:, 1]] += self._increment
+        _positive_update(valid_scan_cells, self._map, self._increment, self._lambda_max)
+        _negative_update(valid_scan_cells, origin_cell, self._map, self._decrement, self._lambda_min)
 
     def valid_scan(self, cells):
         """
