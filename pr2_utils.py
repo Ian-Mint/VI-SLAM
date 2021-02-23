@@ -136,7 +136,7 @@ def bresenham2D(sx, sy, ex, ey):
             y = sy + np.cumsum(q)
         else:
             y = sy - np.cumsum(q)
-    return np.vstack((x, y))
+    return np.stack((x, y), axis=1)
 
 
 def test_bresenham2D():
@@ -157,7 +157,7 @@ def test_bresenham2D():
     num_rep = 1000
     start_time = time.time()
     for i in range(0, num_rep):
-        x, y = bresenham2D(sx, sy, 500, 200)
+        trace = bresenham2D(sx, sy, 500, 200)
     print("1000 raytraces: --- %s seconds ---" % (time.time() - start_time))
 
 

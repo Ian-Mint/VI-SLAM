@@ -24,7 +24,6 @@ class Pose:
             transformed coordinates
         """
         if self.rotation.ndim == 2:
-            assert x.ndim <= 2
             return x @ self.rotation.T + self.position
         if self.rotation.ndim == 3:
             assert x.ndim == 1, "only one vector can be transformed at a time when using tensor pose"
@@ -84,7 +83,7 @@ class Lidar(Sensor):
         self._position = np.array([0.8349, -0.0126869, 1.76416])
         pose = Pose(self._rotation, self._position)
 
-        angles = np.deg2rad(np.linspace(-5, 185, scans._shape[1]))
+        angles = np.deg2rad(np.linspace(-5, 185, scans.shape[1]))
         assert np.allclose(np.linspace(-5, 185, 286) / 180 * np.pi, angles), "angles are calculated wrong"
 
         x_scale = np.cos(angles)
@@ -206,8 +205,10 @@ class Map:
         # x_min, x_max = self.range[0, :]
         # y_min, y_max = self.range[1, :]
 
-        self._inc = np.log(4)
-        self._lambda_max = self._inc * lambda_max_factor
+        self._increment = np.log(4)
+        self._decrement = np.log(4)
+        self._lambda_max = self._increment * lambda_max_factor
+        self._lambda_min = self._decrement * lambda_max_factor
         self._shape = np.array([int(np.ceil(np.diff(x_range) / resolution + 1)),
                                 int(np.ceil(np.diff(y_range)) / resolution + 1)])
         self._map = np.zeros(self._shape, dtype=np.int8)
@@ -248,8 +249,8 @@ class Map:
         """
         # todo: look into JITing this with numba
         for x, y in scan_cells:
-            utils.bresenham2D(x, y, *origin)
-
+            trace = utils.bresenham2D(x, y, *origin)
+            self._map[trace[:, 0], trace[:, 1]] -= self._decrement
 
     def _positive_update(self, scan_cells) -> None:
         """
@@ -258,7 +259,7 @@ class Map:
         Args:
             scan_cells: Indices of cells where an object was detected
         """
-        self._map[scan_cells[:, 0], scan_cells[:, 1]] += self._inc
+        self._map[scan_cells[:, 0], scan_cells[:, 1]] += self._increment
 
     def valid_scan(self, cells):
         """

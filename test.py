@@ -1,3 +1,4 @@
+from functools import lru_cache
 import unittest
 import math
 from math import cos, sin
@@ -36,9 +37,14 @@ def R_from_RPY(roll, pitch, yaw):
     return Rz(yaw) @ Ry(pitch) @ Rx(roll)
 
 
+@lru_cache()
+def get_lidar():
+    return sensors.Lidar()
+
+
 class TestLidar(unittest.TestCase):
     def setUp(self) -> None:
-        self.lidar = sensors.Lidar()
+        self.lidar = get_lidar()
 
     def test_time_is_np_array(self):
         self.assertIsInstance(self.lidar.time, np.ndarray)
@@ -55,6 +61,7 @@ class TestLidar(unittest.TestCase):
 
     def test_all_timestamps_unique(self):
         self.assertEqual(len(np.unique(self.lidar.time)), len(self.lidar.time))
+
 
 if __name__ == '__main__':
     unittest.main()
