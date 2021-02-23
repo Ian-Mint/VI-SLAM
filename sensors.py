@@ -196,12 +196,12 @@ class Car:
         Pose object for the particle with the largest weight
 
         Returns:
-            a Pose object
+            # a Pose object
         """
         return Pose(self.rotation, self.position)
 
 
-# @numba.njit()
+@numba.njit(parallel=True)
 def _negative_update(scan_cells, origin_cell, map_, decrement) -> None:
     """
     Decrement the likelihood of cells where no object was detected
@@ -212,15 +212,16 @@ def _negative_update(scan_cells, origin_cell, map_, decrement) -> None:
         map_: A 2d numpy array containing cell log-likelihoods
         decrement: How much to decrement each cell encountered during Bresenham trace
     """
-    # 0.001166 per iteration (141s total) without JIT (and without the inner for loop)
-    # 0.001472 per iteration (172s total) with JIT
+    # 0.002024s per iteration (241s total) without JIT (and without the inner for loop)
+    # 0.001472s per iteration (172s total) with JIT
+    # 0.000646s per iteration (81s total) parallelized with JIT (four cores)
     ex, ey = origin_cell
-    for sx, sy in scan_cells:
+    for i in numba.prange(len(scan_cells)):
+        sx, sy = scan_cells[i]
         trace = utils.bresenham2D(sx, sy, ex, ey)
         # The code below replaces the commented out line for numba compatibility
-        map_[trace[:, 0], trace[:, 1]] -= decrement
-        # for tx, ty in trace:
-        #     map_[tx, ty] -= decrement
+        for tx, ty in trace:
+            map_[tx, ty] -= decrement
 
 
 class Map:

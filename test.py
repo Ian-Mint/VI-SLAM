@@ -67,9 +67,14 @@ class TestLidar(unittest.TestCase):
 
 # noinspection PyPep8Naming
 class TestRunner(unittest.TestCase):
+    def test_lidar_single_line(self):
+        runner = self.run_lidar_single_line()
+        runner.map.show('test_lidar_single_line')
+
+    @staticmethod
     @patch('sensors.Encoder')
     @patch('sensors.Gyro')
-    def test_lidar_single_line(self, MockEncoder, MockGyro):
+    def run_lidar_single_line(MockEncoder, MockGyro):
         runner = Runner(
             MockEncoder(),
             MockGyro(),
@@ -79,9 +84,10 @@ class TestRunner(unittest.TestCase):
         )
         runner.step_gyro = MagicMock(runner.step_gyro)
         runner.step_encoder = MagicMock(runner.step_encoder)
-
         runner.run()
-        runner.map.show('test_lidar_single_line')
+        return runner
+
+
 
     @patch('sensors.Encoder')
     @patch('sensors.Gyro')
