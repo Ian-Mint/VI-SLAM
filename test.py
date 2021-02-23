@@ -3,6 +3,7 @@ import unittest
 from unittest.mock import patch, MagicMock
 import math
 from math import cos, sin
+import time
 
 import numpy as np
 
@@ -81,6 +82,25 @@ class TestRunner(unittest.TestCase):
 
         runner.run()
         runner.map.show('test_lidar_single_line')
+
+    @patch('sensors.Encoder')
+    @patch('sensors.Gyro')
+    def test_lidar_time(self, MockEncoder, MockGyro):
+        runner = Runner(
+            MockEncoder(),
+            MockGyro(),
+            Lidar(data_file='data/sensor_data/lidar.csv'),
+            Car(n_particles=100),
+            Map(),
+        )
+        runner.step_gyro = MagicMock(runner.step_gyro)
+        runner.step_encoder = MagicMock(runner.step_encoder)
+
+        lidar_len = len(runner.lidar)
+        start = time.time()
+        runner.run()
+        iteration_duration = (time.time() - start) / lidar_len
+        print(f'single scan time {iteration_duration :04f}')
 
 
 if __name__ == '__main__':

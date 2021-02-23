@@ -3,6 +3,7 @@ from typing import List, Tuple, Union
 
 import matplotlib.pyplot as plt
 import numpy as np
+import numba
 
 import pr2_utils as utils
 
@@ -64,6 +65,9 @@ class Lidar(Sensor):
 
         body_xyz_scans = self._pre_process(scans)
         self._data = dict(zip(self.time, body_xyz_scans))
+
+    def __len__(self):
+        return len(self._data)
 
     def _pre_process(self, scans) -> np.ndarray:
         """
@@ -197,6 +201,28 @@ class Car:
         return Pose(self.rotation, self.position)
 
 
+# @numba.njit()
+def _negative_update(scan_cells, origin_cell, map_, decrement) -> None:
+    """
+    Decrement the likelihood of cells where no object was detected
+
+    Args:
+        scan_cells:  Indices of cells where an object was detected
+        origin_cell: The origin of the trace rays (the vehicle location)
+        map_: A 2d numpy array containing cell log-likelihoods
+        decrement: How much to decrement each cell encountered during Bresenham trace
+    """
+    # 0.001166 per iteration (141s total) without JIT (and without the inner for loop)
+    # 0.001472 per iteration (172s total) with JIT
+    ex, ey = origin_cell
+    for sx, sy in scan_cells:
+        trace = utils.bresenham2D(sx, sy, ex, ey)
+        # The code below replaces the commented out line for numba compatibility
+        map_[trace[:, 0], trace[:, 1]] -= decrement
+        # for tx, ty in trace:
+        #     map_[tx, ty] -= decrement
+
+
 class Map:
     def __init__(self, resolution=0.1, x_range=(-50, 50), y_range=(-50, 50), lambda_max_factor=100):
         assert isinstance(resolution, float)
@@ -240,7 +266,7 @@ class Map:
     def shape(self):
         return tuple(self._shape)
 
-    def process_lidar(self, scan: np.ndarray, origin: Union[List, Tuple, np.ndarray]) -> bool:
+    def process_lidar(self, scan: np.ndarray, origin: Union[List, Tuple, np.ndarray]) -> None:
         """
         Update the map according to the results of a lidar scan
 
@@ -249,7 +275,7 @@ class Map:
             origin: Origin of the scan. i.e., the ML location of the car
 
         Returns:
-            True for a successful update
+            None
         """
         assert scan.shape[-1] == 2, "drop the z-dimension for mapping"
         assert origin.shape[-1] == 2, "drop the z-dimension for mapping"
@@ -262,20 +288,7 @@ class Map:
         assert valid_scan_cells.ndim == 2
 
         self._positive_update(valid_scan_cells)
-        self._negative_update(valid_scan_cells, origin)
-        return False
-
-    def _negative_update(self, scan_cells, origin) -> None:
-        """
-        Decrement the likelihood of cells where no object was detected
-
-        Args:
-            scan_cells:  Indices of cells where an object was detected
-        """
-        # todo: look into JITing this with numba
-        for x, y in scan_cells:
-            trace = utils.bresenham2D(x, y, *origin)
-            self._map[trace[:, 0], trace[:, 1]] -= self._decrement
+        _negative_update(valid_scan_cells, origin_cell, self._map, self._decrement)
 
     def _positive_update(self, scan_cells) -> None:
         """
@@ -346,6 +359,9 @@ class Runner:
         self.map = map
 
         self.execution_seq = self.get_execution_sequence()
+
+    def __len__(self):
+        return len(self.execution_seq)
 
     def run(self):
         for timestamp, executor in self.execution_seq:
