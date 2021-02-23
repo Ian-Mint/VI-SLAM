@@ -201,11 +201,7 @@ class Map:
     def __init__(self, resolution=0.1, x_range=(-50, 50), y_range=(-50, 50), lambda_max_factor=100):
         assert isinstance(resolution, float)
         self.resolution = resolution
-        self.range = np.array([x_range, y_range])
-        # x_min, y_min = self.range[:, 0]
-        # x_max, y_max = self.range[:, 1]
-        # x_min, x_max = self.range[0, :]
-        # y_min, y_max = self.range[1, :]
+        self._range = np.array([x_range, y_range])
 
         self._increment = np.log(4)
         self._decrement = np.log(4)
@@ -213,7 +209,27 @@ class Map:
         self._lambda_min = self._decrement * lambda_max_factor
         self._shape = np.array([int(np.ceil(np.diff(x_range) / resolution + 1)),
                                 int(np.ceil(np.diff(y_range)) / resolution + 1)])
-        self._map = np.zeros(self._shape, dtype=np.int8)
+        self._map = np.zeros(self._shape, dtype=np.float)
+
+    @property
+    def minima(self):
+        """x_min, y_min"""
+        return self._range[:, 0]
+
+    @property
+    def maxima(self):
+        """x_max, y_max"""
+        return self._range[:, 1]
+
+    @property
+    def x_range(self):
+        """x_min, x_max"""
+        return self._range[0, :]
+
+    @property
+    def y_range(self):
+        """y_min, y_max"""
+        return self._range[1, :]
 
     def show(self, title):
         plt.imshow(self._map, cmap='gray')
@@ -235,6 +251,8 @@ class Map:
         Returns:
             True for a successful update
         """
+        assert scan.shape[-1] == 2, "drop the z-dimension for mapping"
+        assert origin.shape[-1] == 2, "drop the z-dimension for mapping"
         scan_cells = self.coord_to_cell(scan)
         origin_cell = self.coord_to_cell(origin)
         assert self.is_in_map(origin_cell), "origin is outside the map"
@@ -311,7 +329,7 @@ class Map:
             point = np.array(point)
         else:
             assert isinstance(point, np.ndarray)
-        point_is = np.ceil((point - self.range[:, 0]) / self.resolution).astype(np.int16) - 1
+        point_is = np.ceil((point - self.minima) / self.resolution).astype(np.int16) - 1
         return point_is
 
 
@@ -355,4 +373,6 @@ class Runner:
 
     def step_lidar(self, timestamp):
         scan_body = self.lidar[timestamp]
-        scan_world = self.car.ml_pose.transform(scan_body)
+        car_pose = self.car.ml_pose
+        scan_world = car_pose.transform(scan_body)
+        self.map.process_lidar(scan=scan_world[:, :2], origin=car_pose.position[:2])
