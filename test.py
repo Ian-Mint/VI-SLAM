@@ -1,11 +1,12 @@
 from functools import lru_cache
 import unittest
+from unittest.mock import patch, MagicMock
 import math
 from math import cos, sin
 
 import numpy as np
 
-import sensors
+from sensors import *
 
 
 # noinspection PyPep8Naming
@@ -39,7 +40,7 @@ def R_from_RPY(roll, pitch, yaw):
 
 @lru_cache()
 def get_lidar():
-    return sensors.Lidar()
+    return Lidar()
 
 
 class TestLidar(unittest.TestCase):
@@ -61,6 +62,25 @@ class TestLidar(unittest.TestCase):
 
     def test_all_timestamps_unique(self):
         self.assertEqual(len(np.unique(self.lidar.time)), len(self.lidar.time))
+
+
+# noinspection PyPep8Naming
+class TestRunner(unittest.TestCase):
+    @patch('sensors.Encoder')
+    @patch('sensors.Gyro')
+    def test_lidar_single_line(self, MockEncoder, MockGyro):
+        runner = Runner(
+            MockEncoder(),
+            MockGyro(),
+            Lidar(data_file='data/test/lidar.csv'),
+            Car(n_particles=100),
+            Map(),
+        )
+        runner.step_gyro = MagicMock(runner.step_gyro)
+        runner.step_encoder = MagicMock(runner.step_encoder)
+
+        runner.run()
+        runner.map.show('test_lidar_single_line')
 
 
 if __name__ == '__main__':

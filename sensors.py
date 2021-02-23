@@ -1,10 +1,12 @@
 from abc import ABC
 from typing import List, Tuple, Union
 
-import cv2
+import matplotlib.pyplot as plt
 import numpy as np
 
 import pr2_utils as utils
+
+__all__ = ['Encoder', 'Gyro', 'Lidar', 'Map', 'Car', 'Runner']
 
 
 class Pose:
@@ -197,7 +199,7 @@ class Car:
 
 class Map:
     def __init__(self, resolution=0.1, x_range=(-50, 50), y_range=(-50, 50), lambda_max_factor=100):
-        assert isinstance(self.resolution, float)
+        assert isinstance(resolution, float)
         self.resolution = resolution
         self.range = np.array([x_range, y_range])
         # x_min, y_min = self.range[:, 0]
@@ -212,6 +214,11 @@ class Map:
         self._shape = np.array([int(np.ceil(np.diff(x_range) / resolution + 1)),
                                 int(np.ceil(np.diff(y_range)) / resolution + 1)])
         self._map = np.zeros(self._shape, dtype=np.int8)
+
+    def show(self, title):
+        plt.imshow(self._map, cmap='gray')
+        plt.title(title)
+        plt.show()
 
     @property
     def shape(self):
@@ -313,12 +320,12 @@ class Runner:
     A runner class that processes sensor inputs and appropriately updates the car and map objects.
     """
 
-    def __init__(self, n_particles=100):
-        self.encoder = Encoder()
-        self.gyro = Gyro()
-        self.lidar = Lidar()
-        self.car = Car(n_particles)
-        self.map = Map()
+    def __init__(self, encoder: Encoder, gyro: Gyro, lidar: Lidar, car: Car, map: Map):
+        self.encoder = encoder
+        self.gyro = gyro
+        self.lidar = lidar
+        self.car = car
+        self.map = map
 
         self.execution_seq = self.get_execution_sequence()
 
@@ -337,7 +344,7 @@ class Runner:
                                     [self.step_lidar] * len(self.lidar.time)), axis=0)
         execution_sequence = np.stack((timestamps, executors), axis=1)
         execution_sequence = execution_sequence[execution_sequence[:, 0].argsort()]
-        assert execution_sequence._shape == (len(timestamps), 2)
+        assert execution_sequence.shape == (len(timestamps), 2)
         return execution_sequence
 
     def step_gyro(self, timestamp):
