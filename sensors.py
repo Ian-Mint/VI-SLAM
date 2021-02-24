@@ -609,6 +609,7 @@ class Runner:
                                     [self.step_lidar] * len(lidar_time)), axis=0)
         execution_sequence = np.stack((timestamps, executors), axis=1)
         execution_sequence = execution_sequence[execution_sequence[:, 0].argsort()]
+        assert np.all(execution_sequence[1:, 0] >= execution_sequence[:-1, 0])
         assert execution_sequence.shape == (len(timestamps), 2)
         return execution_sequence
 

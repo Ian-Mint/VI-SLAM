@@ -57,7 +57,7 @@ def read_data_from_csv(filename):
     """
     data_csv = pd.read_csv(filename, header=None)
     data = data_csv.values[:, 1:]
-    timestamp = data_csv.values[:, 0]
+    timestamp = data_csv.values[:, 0].astype(np.int)
     return timestamp, data
 
 
