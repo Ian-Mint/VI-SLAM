@@ -392,6 +392,23 @@ def _positive_update(scan_cells, map_, increment, lambda_max) -> None:
             map_[x, y] = lambda_max
 
 
+@numba.njit()
+def coord_to_cell(point: np.ndarray, minima: np.ndarray, resolution: float) -> np.ndarray:
+    """
+    Discretize according to the map layout.
+    Convert from xy (m) coordinates to ij (px) coordinates.
+
+    Args:
+        minima:
+        resolution:
+        point: a point or set of points in meters
+
+    Returns:
+        point or set of points in coordinate indices
+    """
+    return np.ceil((point - minima) / resolution).astype(np.int16) - 1
+
+
 class Map:
     def __init__(self, resolution=0.1, x_range=(-50, 50), y_range=(-50, 50), lambda_max_factor=100):
         resolution = float(resolution)
@@ -472,19 +489,20 @@ class Map:
             None
         """
         self.update_count += 1
-        origin_cell = self.coord_to_cell(origin)
+        origin_cell = coord_to_cell(origin, self.minima, self.resolution)
         assert self.is_in_map(origin_cell), "origin is outside the map"
         valid_scan_cells = self.get_valid_scan_cells(scan)
 
         _positive_update(valid_scan_cells, self._map, self._increment, self._lambda_max)
         _negative_update(valid_scan_cells, origin_cell, self._map, self._decrement, self._lambda_min)
 
+    def coord_to_cell(self, position):
+        return coord_to_cell(position, self.minima, self.resolution)
+
     def get_valid_scan_cells(self, scan):
-        assert scan.shape[-1] == 2, "drop the z-dimension for mapping"
-        scan_cells = self.coord_to_cell(scan)
+        scan_cells = coord_to_cell(scan, self.minima, self.resolution)
         scan_valid = self.valid_scan(scan_cells)
         valid_scan_cells = scan_cells[scan_valid]
-        assert len(valid_scan_cells) == scan_valid.sum()
         return valid_scan_cells
 
     def valid_scan(self, cells):
@@ -516,24 +534,6 @@ class Map:
         """
         return np.all(origin_cell > 0) and np.all(origin_cell < self._shape)
 
-    def coord_to_cell(self, point) -> np.ndarray:
-        """
-        Discretize according to the map layout.
-        Convert from xy (m) coordinates to ij (px) coordinates.
-
-        Args:
-            point: a point or set of points in meters
-
-        Returns:
-            point or set of points in coordinate indices
-        """
-        if isinstance(point, (tuple, list)):
-            point = np.array(point)
-        else:
-            assert isinstance(point, np.ndarray)
-        point_is = np.ceil((point - self.minima) / self.resolution).astype(np.int16) - 1
-        return point_is
-
     def correlation(self, scan) -> np.ndarray:
         """
         Compute the correlation
@@ -543,10 +543,11 @@ class Map:
         Returns:
             shape (n_particles)
         """
+        ml_map = self.ml_map
         corr = np.zeros(len(scan))
         for i, particle_scan in enumerate(scan):
             valid_scan_cells = self.get_valid_scan_cells(scan)
-            selected_map_cells = self.ml_map[valid_scan_cells[..., 0], valid_scan_cells[..., 1]]
+            selected_map_cells = ml_map[valid_scan_cells[..., 0], valid_scan_cells[..., 1]]
             corr[i] = np.sum(selected_map_cells)
         assert len(corr) == len(scan)
         assert corr.ndim == 1

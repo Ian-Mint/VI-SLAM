@@ -16,4 +16,8 @@ if __name__ == '__main__':
         downsample=1,
         plot_interval=1000
     )
-    runner.run()
+    try:
+        runner.run()
+    except KeyboardInterrupt:
+        import matplotlib.pyplot as plt
+        plt.show()
