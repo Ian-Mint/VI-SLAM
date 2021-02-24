@@ -36,15 +36,21 @@ def r_2d(theta: np.ndarray):
 
 class Pose:
     def __init__(self, rotation: np.ndarray, position: np.ndarray):
+        """
+
+        Args:
+            rotation: rotation matrix or yaw angles
+            position: positions
+        """
         if rotation.ndim > 1:
             assert (rotation.shape[-2], rotation.shape[-1]) == (3, 3)
             self.rotation = rotation
         else:
-            self.rotation = r_2d(rotation)
+            self.rotation = r_2d(np.array([rotation])).squeeze()
         self.position = position
-        assert rotation.ndim - 1 == position.ndim
-        assert rotation.ndim in {2, 3}
-        assert len(rotation) == len(position)
+        assert self.rotation.ndim - 1 == self.position.ndim
+        assert self.rotation.ndim in {2, 3}
+        assert len(self.rotation) == len(self.position)
 
     def transform(self, x):
         """
@@ -98,8 +104,8 @@ class Lidar(Sensor):
         self._max_range = 75.
         self._min_range = 2.
 
-        body_xyz_scans = self._pre_process(scans)
-        self._data = dict(zip(self.time, body_xyz_scans))
+        body_xy_scans = self._pre_process(scans)
+        self._data = dict(zip(self.time, body_xy_scans))
 
     def __len__(self):
         return len(self._data)
@@ -115,7 +121,7 @@ class Lidar(Sensor):
         T: 0.8349 -0.0126869 1.76416p
 
         Returns:
-            n x d x 3 numpy array
+            n x d x 2 numpy array
         """
         self._rpy = (142.759, 0.0584636, 89.9254)
         self._rotation = np.array([[0.00130201, 0.796097, 0.605167],
@@ -141,7 +147,7 @@ class Lidar(Sensor):
 
         assert np.allclose(self._rotation @ xyz_scan_sensor[0, 0] + self._position, xyz_scan_body[0, 0]), \
             "Broadcasting did not work as expected"
-        return xyz_scan_body
+        return xyz_scan_body[..., :2]
 
 
 class Gyro(Sensor):
@@ -149,7 +155,8 @@ class Gyro(Sensor):
         self.time, omega_sensor = utils.read_data_from_csv(data_file)
         yaw = omega_sensor[:, 2]
         data = self._pre_process(yaw)
-        self._data = dict(zip(self.time[1:], data))
+        self.time = self.time[1:]
+        self._data = dict(zip(self.time, data))
 
     def _pre_process(self, yaw) -> np.ndarray:
         """
@@ -466,7 +473,7 @@ class Map:
         scan_cells = self.coord_to_cell(scan)
         scan_valid = self.valid_scan(scan_cells)
         valid_scan_cells = scan_cells[scan_valid]
-        assert valid_scan_cells.shape == scan_valid.shape
+        assert len(valid_scan_cells) == scan_valid.sum()
         return valid_scan_cells
 
     def valid_scan(self, cells):
@@ -478,13 +485,13 @@ class Map:
             cells: numpy array of cell coordinates
 
         Returns:
-            Valid cells are set to True. Drops the last two (x,y) dimensions of cells
+            Valid cells are set to True. Drops the last (x,y) dimension of cells
         """
         gt_one_cell = cells > 1
         lt_map_size = cells < self._shape
         valid = np.logical_and.reduce(
             [gt_one_cell[..., 0], gt_one_cell[..., 1], lt_map_size[..., 0], lt_map_size[..., 1]])
-        assert valid.shape == cells.shape[:-2]
+        assert valid.shape == cells.shape[:-1]
         return valid
 
     def is_in_map(self, origin_cell: np.ndarray) -> bool:
@@ -567,7 +574,8 @@ class Runner:
         return len(self.execution_seq)
 
     def run(self):
-        for timestamp, executor in self.execution_seq:
+        # enumerate for debugging
+        for i, (timestamp, executor) in enumerate(self.execution_seq):
             executor(timestamp)
 
     def plot(self):
