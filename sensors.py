@@ -1,4 +1,5 @@
 from abc import ABC
+import time
 from typing import List, Tuple, Union
 
 import matplotlib.pyplot as plt
@@ -71,6 +72,9 @@ class Pose:
             return rotated + np.expand_dims(self.position, axis=1)
         else:
             return rotated + self.position
+
+    def __repr__(self):
+        return f'position: {self.position.__repr__()}\nrotation: {self.rotation.__repr__()}'
 
     def __matmul__(self, other):
         rotation = self.rotation @ other.rotation
@@ -196,9 +200,8 @@ def _get_update(distance) -> np.ndarray:
         translated distance of the center of the vehicle
     """
     # difference between right and left count in a time step
-    distance_diff = np.diff(distance, axis=1).squeeze()
-    center_arc = distance_diff / 2
-    return center_arc
+    avg_distance = np.sum(distance, axis=1).squeeze()
+    return avg_distance / 2
 
 
 class Encoder(Sensor):
@@ -265,7 +268,7 @@ class Car:
         self.position[:] = self.position[resampled_indices]
         self.weights = self.uniform_prior()
 
-    def predict(self, yaw, time_step):
+    def predict(self, yaw: float, time_step: int):
         v_noise = np.random.normal(loc=0, scale=self.v_var, size=len(self))
         omega_noise = np.random.normal(loc=0, scale=self.omega_var, size=len(self))
 
@@ -580,15 +583,22 @@ class Runner:
         return len(self.execution_seq)
 
     def run(self):
+        print("Run starting")
+        report_iterations = int(1e6)
+
         # enumerate for debugging
+        start = time.time()
         for i, (timestamp, executor) in enumerate(self.execution_seq):
             executor(timestamp)
+            if (i + 1) % report_iterations == 0:
+                print(f'Sample {i // report_iterations} million in {time.time() - start: 02f}s')
+                start = time.time()
 
     def plot(self):
-        max_value = 256
+        max_value = 255
         red = np.array([max_value, 0, 0])
         map_ = (self.map.ml_map_for_plot * max_value).astype(np.int)
-        map_ = np.tile(map_, (3, 1)).T
+        map_ = np.stack([map_] * 3, axis=2)
 
         particles = self.map.coord_to_cell(self.car.position)
         map_[particles[:, 0], particles[:, 1], :] = red
@@ -629,7 +639,7 @@ class Runner:
 
     def step_gyro(self, timestamp):
         time_step, yaw = self.gyro[timestamp]
-        self.car.predict(time_step, yaw)
+        self.car.predict(yaw, time_step)
 
     def step_encoder(self, timestamp):
         """
@@ -651,9 +661,9 @@ class Runner:
         # Update map according to the maximum likelihood pose of the car
         car_pose = self.car.ml_pose
         scan_world = car_pose.transform(scan_body)
-        self.map.update(scan=scan_world[:, :2], origin=car_pose.position[:2])
+        self.map.update(scan=scan_world[:, :2], origin=car_pose.position)
 
-        if (self.map.update_count + 1) % self.plot_interval:
+        if (self.map.update_count + 1) % self.plot_interval == 0:
             self.plot()
 
     def _get_correlation(self, scan_body) -> np.ndarray:

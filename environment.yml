@@ -1,0 +1,11 @@
+name: ece276a
+channels:
+  - defaults
+dependencies:
+  - opencv
+  - matplotlib
+  - numpy
+  - pandas
+  - scipy
+  - scikit-image
+  - numba

@@ -10,9 +10,9 @@ if __name__ == '__main__':
         Encoder(),
         Gyro(),
         Lidar(),
-        Car(n_particles=100, v_var=1e-3, omega_var=1e-6, resample_threshold=0.5),
-        Map(resolution=0.1, x_range=(-50, 50), y_range=(-50, 50), lambda_max_factor=100),
+        Car(n_particles=4, v_var=0, omega_var=0, resample_threshold=0.5),  # variance in m/nanosecond
+        Map(resolution=1., x_range=(-500, 500), y_range=(-500, 500), lambda_max_factor=100),
         downsample=1,
-        plot_interval=1
+        plot_interval=1000
     )
     runner.run()
