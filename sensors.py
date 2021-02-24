@@ -164,10 +164,11 @@ class Gyro(Sensor):
         * The sensor measurements are stored as [timestamp, delta roll, delta pitch, delta yaw] in radians.
 
         Returns:
-
+            time-delta and yaw. The first yaw sample is dropped because there is no corresponding time delta.
         """
         time_delta = np.diff(self.time)
-        return np.stack((time_delta, yaw), axis=1)
+        assert np.all(time_delta > 0)
+        return np.stack((time_delta, yaw[1:]), axis=1)
 
 
 def _get_update(distance) -> np.ndarray:
