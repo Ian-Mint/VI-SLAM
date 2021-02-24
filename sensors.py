@@ -46,26 +46,31 @@ class Pose:
             assert (rotation.shape[-2], rotation.shape[-1]) == (3, 3)
             self.rotation = rotation
         else:
-            self.rotation = r_2d(np.array([rotation])).squeeze()
+            if isinstance(rotation, np.ndarray):
+                self.rotation = r_2d(rotation)
+            else:
+                self.rotation = r_2d(np.array([rotation])).squeeze()
         self.position = position
         assert self.rotation.ndim - 1 == self.position.ndim
         assert self.rotation.ndim in {2, 3}
         assert len(self.rotation) == len(self.position)
 
-    def transform(self, x):
+    def transform(self, x) -> np.ndarray:
         """
         multiplies by rotation and adds position
         Args:
             x: coordinates must be in last dimension
 
         Returns:
-            transformed coordinates. in dimensions (n_x, n_r, d_r)
+            transformed coordinates. in dimensions (n_particles, n_points, 2)
         """
-        t = x @ self.rotation.T + self.position
+        rotated = x @ self.rotation.T
         if self.rotation.ndim > 2:
-            return np.transpose(t, axes=(1, 2, 0))
+            rotated = rotated.T
+        if self.rotation.ndim > 2 and x.ndim > 1:
+            return rotated + np.expand_dims(self.position, axis=1)
         else:
-            return t
+            return rotated + self.position
 
     def __matmul__(self, other):
         rotation = self.rotation @ other.rotation
@@ -534,8 +539,9 @@ class Map:
         """
         valid_scan_cells = self.get_valid_scan_cells(scan)
         selected_map_cells = self.ml_map[valid_scan_cells[..., 0], valid_scan_cells[..., 1]]
-        corr = np.sum(selected_map_cells, axis=1)
+        corr = np.sum(selected_map_cells.reshape((len(scan), -1)), axis=1)
         assert len(corr) == len(scan)
+        assert corr.ndim == 1
         return corr
 
 
