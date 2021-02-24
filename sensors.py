@@ -10,6 +10,19 @@ import pr2_utils as utils
 __all__ = ['Encoder', 'Gyro', 'Lidar', 'Map', 'Car', 'Runner']
 
 
+def softmax(x: np.ndarray) -> np.ndarray:
+    """
+    Softmax function, normalizing over the last axis
+
+    Args:
+        x: numpy array with features in the last dimension
+
+    Returns:
+        shape x.shape[:-1]
+    """
+    return x / np.sum(x, axis=x.ndim - 1, keepdims=True)
+
+
 @numba.njit()
 def r_2d(theta: np.ndarray):
     rotations = np.zeros((len(theta), 2, 2))
@@ -211,7 +224,8 @@ class Encoder(Sensor):
 
 
 class Car:
-    def __init__(self, n_particles, v_var, omega_var):
+    def __init__(self, n_particles, v_var, omega_var, resample_threshold):
+        self.resample_threshold = resample_threshold * n_particles
         self.v_var = v_var
         self.omega_var = omega_var
         self.n_particles = n_particles
@@ -219,15 +233,24 @@ class Car:
         n_dims = 2
         self.yaw = np.zeros(n_particles)
         self.position = np.zeros((n_particles, n_dims))
-        self.weights = np.ones((n_particles,)) / n_particles
+        self.weights = self.uniform_prior()
 
         self.velocity = 0.
+
+    def uniform_prior(self):
+        n_particles = self.n_particles
+        return np.ones((n_particles,)) / n_particles
 
     def __len__(self):
         return self.n_particles
 
     def resample(self):
-        pass
+        particle_indices = np.arange(0, self.n_particles)
+        resampled_indices = np.random.choice(particle_indices, size=self.n_particles, replace=True, p=self.weights)
+
+        self.yaw[:] = self.yaw[resampled_indices]
+        self.position[:] = self.position[resampled_indices]
+        self.weights = self.uniform_prior()
 
     def predict(self, yaw, time_step):
         v_noise = np.random.normal(loc=0, scale=self.v_var, size=len(self))
@@ -265,6 +288,21 @@ class Car:
             x transformed into the world frame
         """
         return self.pose.transform(x)
+
+    def update(self, new_weights: np.ndarray):
+        self.weights[:] = new_weights
+        if self.n_eff < self.resample_threshold:
+            self.resample()
+
+    @property
+    def n_eff(self) -> float:
+        """
+        Number of effective samples
+
+        Returns:
+            A value in the range [0, n_samples]
+        """
+        return 1 / np.sum(self.weights ** 2)
 
     @property
     def ml_pose(self) -> Pose:
@@ -336,7 +374,7 @@ def _positive_update(scan_cells, map_, increment, lambda_max) -> None:
 
 
 class Map:
-    def __init__(self, resolution=0.1, x_range=(-50, 50), y_range=(-50, 50), lambda_max_factor=100, plt_interval=1000):
+    def __init__(self, resolution=0.1, x_range=(-50, 50), y_range=(-50, 50), lambda_max_factor=100):
         assert isinstance(resolution, float)
         self.resolution = resolution
         self._range = np.array([x_range, y_range])
@@ -350,7 +388,6 @@ class Map:
         self._map = np.zeros(self._shape, dtype=np.float)
 
         self.update_count = 0
-        self.plt_interval = plt_interval  # plot the map every 1000 scans
 
     @property
     def minima(self):
@@ -382,15 +419,21 @@ class Map:
         plt.show()
 
     def show_map(self, title):
-        img = -self.ml_map + 1  # invert the map
+        img = self.ml_map_for_plot
         plt.imshow(img, cmap='gray')
         plt.title(title)
         plt.show()
 
     @property
-    def ml_map(self):
-        ml_map = np.zeros_like(self._map)
+    def ml_map_for_plot(self):
+        ml_map = np.ones_like(self._map)
         ml_map[self._map == 0] = 0.5
+        ml_map[self._map > 0] = 0
+        return ml_map
+
+    @property
+    def ml_map(self):
+        ml_map = np.zeros_like(self._map, dtype=bool)
         ml_map[self._map > 0] = 1
         return ml_map
 
@@ -422,7 +465,7 @@ class Map:
         scan_cells = self.coord_to_cell(scan)
         scan_valid = self.valid_scan(scan_cells)
         valid_scan_cells = scan_cells[scan_valid]
-        assert valid_scan_cells.ndim == 2
+        assert valid_scan_cells.shape == scan_valid.shape
         return valid_scan_cells
 
     def valid_scan(self, cells):
@@ -434,12 +477,13 @@ class Map:
             cells: numpy array of cell coordinates
 
         Returns:
-            1-d boolean array, where valid cells are set to True
+            Valid cells are set to True. Drops the last two (x,y) dimensions of cells
         """
         gt_one_cell = cells > 1
         lt_map_size = cells < self._shape
-        valid = np.logical_and.reduce([gt_one_cell[:, 0], gt_one_cell[:, 1], lt_map_size[:, 0], lt_map_size[:, 1]])
-        assert valid.ndim == 1
+        valid = np.logical_and.reduce(
+            [gt_one_cell[..., 0], gt_one_cell[..., 1], lt_map_size[..., 0], lt_map_size[..., 1]])
+        assert valid.shape == cells.shape[:-2]
         return valid
 
     def is_in_map(self, origin_cell: np.ndarray) -> bool:
@@ -471,8 +515,20 @@ class Map:
         point_is = np.ceil((point - self.minima) / self.resolution).astype(np.int16) - 1
         return point_is
 
-    def correlation(self, valid_scan_cells):
-        return np.sum(self.ml_map[valid_scan_cells])
+    def correlation(self, scan) -> np.ndarray:
+        """
+        Compute the correlation
+        Args:
+            scan: shape (n_particles, n_scans, 2)
+
+        Returns:
+            shape (n_particles)
+        """
+        valid_scan_cells = self.get_valid_scan_cells(scan)
+        selected_map_cells = self.ml_map[valid_scan_cells[..., 0], valid_scan_cells[..., 1]]
+        corr = np.sum(selected_map_cells, axis=1)
+        assert len(corr) == len(scan)
+        return corr
 
 
 class Runner:
@@ -480,12 +536,29 @@ class Runner:
     A runner class that processes sensor inputs and appropriately updates the car and map objects.
     """
 
-    def __init__(self, encoder: Encoder, gyro: Gyro, lidar: Lidar, car: Car, map_: Map):
+    def __init__(self, encoder: Encoder, gyro: Gyro, lidar: Lidar, car: Car, map_: Map, downsample: int = 1,
+                 plot_interval=0):
+        """
+        Args:
+            encoder: Encoder object
+            gyro: Gyro object
+            lidar: Lidar object
+            car: Car object
+            map_: Map object
+            downsample: Factor by which to downsample. default=1, i.e. no down-sampling
+            plot_interval: Interval at which to update the map plot
+        """
+        assert isinstance(downsample, int)
+        self.plot_interval = plot_interval
+        self.downsample = downsample
         self.encoder = encoder
         self.gyro = gyro
         self.lidar = lidar
         self.car = car
         self.map = map_
+        self._figure = None
+        self._ax = None
+        self._fig_handle = None
 
         self.execution_seq = self.get_execution_sequence()
 
@@ -496,15 +569,43 @@ class Runner:
         for timestamp, executor in self.execution_seq:
             executor(timestamp)
 
+    def plot(self):
+        max_value = 256
+        red = np.array([max_value, 0, 0])
+        map_ = (self.map.ml_map_for_plot * max_value).astype(np.int)
+        map_ = np.tile(map_, (3, 1)).T
+
+        particles = self.map.coord_to_cell(self.car.position)
+        map_[particles[:, 0], particles[:, 1], :] = red
+
+        if self._figure is None:
+            self._figure = plt.figure()
+            self._ax = self._figure.gca()
+            self._fig_handle = self._ax.imshow(map_)
+            self._figure.show()
+        else:
+            self._fig_handle.set_data(map_)
+        self._ax.set_title(f"map")
+        self._figure.canvas.draw()
+
     def get_execution_sequence(self) -> np.ndarray:
         """
         Create a numpy array consisting of (timestamp, executor) pairs, sorted by timestamp.
         """
-        timestamps = np.concatenate((self.encoder.time, self.gyro.time, self.lidar.time), axis=0)
+        gyro_time = self.gyro.time
+        encoder_time = self.encoder.time
+        lidar_time = self.lidar.time
+
+        if self.downsample > 1:
+            gyro_time = gyro_time[0::self.downsample]
+            lidar_time = gyro_time[0::self.downsample]
+            encoder_time = encoder_time[0::self.downsample]
+
+        timestamps = np.concatenate((encoder_time, gyro_time, lidar_time), axis=0)
         assert timestamps.ndim == 1
-        executors = np.concatenate(([self.step_encoder] * len(self.encoder.time),
-                                    [self.step_gyro] * len(self.gyro.time),
-                                    [self.step_lidar] * len(self.lidar.time)), axis=0)
+        executors = np.concatenate(([self.step_encoder] * len(encoder_time),
+                                    [self.step_gyro] * len(gyro_time),
+                                    [self.step_lidar] * len(lidar_time)), axis=0)
         execution_sequence = np.stack((timestamps, executors), axis=1)
         execution_sequence = execution_sequence[execution_sequence[:, 0].argsort()]
         assert execution_sequence.shape == (len(timestamps), 2)
@@ -529,11 +630,17 @@ class Runner:
         scan_body = self.lidar[timestamp]
         if self.map.update_count > 0:  # ensure there is a map
             correlation = self._get_correlation(scan_body)
+            self.car.update(softmax(correlation))
 
         # Update map according to the maximum likelihood pose of the car
         car_pose = self.car.ml_pose
         scan_world = car_pose.transform(scan_body)
         self.map.update(scan=scan_world[:, :2], origin=car_pose.position[:2])
 
+        if (self.map.update_count + 1) % self.plot_interval:
+            self.plot()
+
     def _get_correlation(self, scan_body) -> np.ndarray:
-        scan_world = self.car.transform_ml()
+        scan_world = self.car.transform_all(scan_body)
+        assert scan_world.shape == (self.car.n_particles, *scan_body.shape)
+        return self.map.correlation(scan_world)
