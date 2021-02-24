@@ -40,13 +40,13 @@ class Pose:
             x: coordinates must be in last dimension
 
         Returns:
-            transformed coordinates
+            transformed coordinates. in dimensions (n_x, n_r, d_r)
         """
-        if self.rotation.ndim == 2:
-            return x @ self.rotation.T + self.position
-        if self.rotation.ndim == 3:
-            assert x.ndim == 1, "only one vector can be transformed at a time when using tensor pose"
-            raise NotImplementedError("Tensor pose not yet implemented")
+        t = x @ self.rotation.T + self.position
+        if self.rotation.ndim > 2:
+            return np.transpose(t, axes=(1, 2, 0))
+        else:
+            return t
 
     def __matmul__(self, other):
         rotation = self.rotation @ other.rotation
@@ -242,7 +242,7 @@ class Car:
         self.position[:, 1] += dy
         self.yaw += dtheta
 
-    def transform(self, x):
+    def transform_ml(self, x):
         """
         Transform x into the world frame, using the pose of the maximum likelihood particle
 
@@ -252,8 +252,19 @@ class Car:
         Returns:
             x transformed into the world frame
         """
-        # todo: also need a method transforming a single vector into multiple positions
         return self.ml_pose.transform(x)
+
+    def transform_all(self, x):
+        """
+        Transform x into the world frame, broadcasting into all particles.
+
+        Args:
+            x: a set of coordinates (samples, 3)
+
+        Returns:
+            x transformed into the world frame
+        """
+        return self.pose.transform(x)
 
     @property
     def ml_pose(self) -> Pose:
@@ -325,7 +336,7 @@ def _positive_update(scan_cells, map_, increment, lambda_max) -> None:
 
 
 class Map:
-    def __init__(self, resolution=0.1, x_range=(-50, 50), y_range=(-50, 50), lambda_max_factor=100):
+    def __init__(self, resolution=0.1, x_range=(-50, 50), y_range=(-50, 50), lambda_max_factor=100, plt_interval=1000):
         assert isinstance(resolution, float)
         self.resolution = resolution
         self._range = np.array([x_range, y_range])
@@ -338,7 +349,8 @@ class Map:
                                 int(np.ceil(np.diff(y_range)) / resolution + 1)])
         self._map = np.zeros(self._shape, dtype=np.float)
 
-        self.initialized = False
+        self.update_count = 0
+        self.plt_interval = plt_interval  # plot the map every 1000 scans
 
     @property
     def minima(self):
@@ -370,22 +382,23 @@ class Map:
         plt.show()
 
     def show_map(self, title):
-        plt.imshow(self.ml_map, cmap='gray')
+        img = -self.ml_map + 1  # invert the map
+        plt.imshow(img, cmap='gray')
         plt.title(title)
         plt.show()
 
     @property
     def ml_map(self):
-        ml_map = np.ones_like(self._map)
+        ml_map = np.zeros_like(self._map)
         ml_map[self._map == 0] = 0.5
-        ml_map[self._map > 0] = 0
+        ml_map[self._map > 0] = 1
         return ml_map
 
     @property
     def shape(self):
         return tuple(self._shape)
 
-    def process_lidar(self, scan: np.ndarray, origin: Union[List, Tuple, np.ndarray]) -> None:
+    def update(self, scan: np.ndarray, origin: Union[List, Tuple, np.ndarray]) -> None:
         """
         Update the map according to the results of a lidar scan
 
@@ -396,19 +409,21 @@ class Map:
         Returns:
             None
         """
-        self.initialized = True
-        assert scan.shape[-1] == 2, "drop the z-dimension for mapping"
-        assert origin.shape[-1] == 2, "drop the z-dimension for mapping"
-        scan_cells = self.coord_to_cell(scan)
+        self.update_count += 1
         origin_cell = self.coord_to_cell(origin)
         assert self.is_in_map(origin_cell), "origin is outside the map"
-        scan_valid = self.valid_scan(scan_cells)
-
-        valid_scan_cells = scan_cells[scan_valid]
-        assert valid_scan_cells.ndim == 2
+        valid_scan_cells = self.get_valid_scan_cells(scan)
 
         _positive_update(valid_scan_cells, self._map, self._increment, self._lambda_max)
         _negative_update(valid_scan_cells, origin_cell, self._map, self._decrement, self._lambda_min)
+
+    def get_valid_scan_cells(self, scan):
+        assert scan.shape[-1] == 2, "drop the z-dimension for mapping"
+        scan_cells = self.coord_to_cell(scan)
+        scan_valid = self.valid_scan(scan_cells)
+        valid_scan_cells = scan_cells[scan_valid]
+        assert valid_scan_cells.ndim == 2
+        return valid_scan_cells
 
     def valid_scan(self, cells):
         """
@@ -455,6 +470,9 @@ class Map:
             assert isinstance(point, np.ndarray)
         point_is = np.ceil((point - self.minima) / self.resolution).astype(np.int16) - 1
         return point_is
+
+    def correlation(self, valid_scan_cells):
+        return np.sum(self.ml_map[valid_scan_cells])
 
 
 class Runner:
@@ -509,11 +527,13 @@ class Runner:
 
     def step_lidar(self, timestamp):
         scan_body = self.lidar[timestamp]
-        if self.map.initialized:
-            # todo: compute correllation
-            pass
+        if self.map.update_count > 0:  # ensure there is a map
+            correlation = self._get_correlation(scan_body)
 
         # Update map according to the maximum likelihood pose of the car
         car_pose = self.car.ml_pose
         scan_world = car_pose.transform(scan_body)
-        self.map.process_lidar(scan=scan_world[:, :2], origin=car_pose.position[:2])
+        self.map.update(scan=scan_world[:, :2], origin=car_pose.position[:2])
+
+    def _get_correlation(self, scan_body) -> np.ndarray:
+        scan_world = self.car.transform_ml()

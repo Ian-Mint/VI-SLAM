@@ -88,10 +88,10 @@ def mapCorrelation(im, x_im, y_im, vp, xs, ys):
         iy = np.int16(np.round((y1 - ymin) / yresolution))
         for jx in range(0, nxs):
             x1 = vp[0, :] + xs[jx]  # 1 x 1076
-            ix = np.int16(np.round((x1 - xmin) / xresolution))
+            x_index = np.int16(np.round((x1 - xmin) / xresolution))
             valid = np.logical_and(np.logical_and((iy >= 0), (iy < ny)),
-                                   np.logical_and((ix >= 0), (ix < nx)))
-            cpr[jx, jy] = np.sum(im[ix[valid], iy[valid]])
+                                   np.logical_and((x_index >= 0), (x_index < nx)))
+            cpr[jx, jy] = np.sum(im[x_index[valid], iy[valid]])
     return cpr
 
 
