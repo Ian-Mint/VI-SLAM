@@ -10,12 +10,28 @@ import pr2_utils as utils
 __all__ = ['Encoder', 'Gyro', 'Lidar', 'Map', 'Car', 'Runner']
 
 
+@numba.njit()
+def r_2d(theta: np.ndarray):
+    rotations = np.zeros((len(theta), 2, 2))
+    for i, t in enumerate(theta):
+        rotations[i, 0, 0] = np.cos(t)
+        rotations[i, 0, 1] = -np.sin(t)
+        rotations[i, 1, 0] = np.sin(t)
+        rotations[i, 1, 1] = np.cos(t)
+    return rotations
+
+
 class Pose:
     def __init__(self, rotation: np.ndarray, position: np.ndarray):
-        self.rotation = rotation
+        if rotation.ndim > 1:
+            assert (rotation.shape[-2], rotation.shape[-1]) == (3, 3)
+            self.rotation = rotation
+        else:
+            self.rotation = r_2d(rotation)
         self.position = position
-        assert rotation.ndim - 1 == self.position.ndim
+        assert rotation.ndim - 1 == position.ndim
         assert rotation.ndim in {2, 3}
+        assert len(rotation) == len(position)
 
     def transform(self, x):
         """
@@ -32,6 +48,11 @@ class Pose:
             assert x.ndim == 1, "only one vector can be transformed at a time when using tensor pose"
             raise NotImplementedError("Tensor pose not yet implemented")
 
+    def __matmul__(self, other):
+        rotation = self.rotation @ other.rotation
+        position = self.position + self.transform(other.position)
+        return Pose(rotation, position)
+
 
 class Sensor(ABC):
     def __getitem__(self, item):
@@ -44,6 +65,7 @@ class Sensor(ABC):
         Returns:
             Sensor output
         """
+        # noinspection PyUnresolvedReferences
         return self._data.pop(item)
 
 
@@ -112,10 +134,11 @@ class Lidar(Sensor):
 class Gyro(Sensor):
     def __init__(self, data_file='data/sensor_data/gyro.csv'):
         self.time, omega_sensor = utils.read_data_from_csv(data_file)
-        omega_body = self._pre_process(omega_sensor)
-        self._data = dict(zip(self.time, omega_body))
+        yaw = omega_sensor[:, 2]
+        data = self._pre_process(yaw)
+        self._data = dict(zip(self.time[1:], data))
 
-    def _pre_process(self, omega_sensor) -> np.ndarray:
+    def _pre_process(self, yaw) -> np.ndarray:
         """
         Pre-process measurements into the body frame
 
@@ -126,39 +149,15 @@ class Gyro(Sensor):
         T: -0.335 -0.035 0.78
 
         * The sensor measurements are stored as [timestamp, delta roll, delta pitch, delta yaw] in radians.
+
+        Returns:
+
         """
-        self._rpy = (0, 0, 0)
-        self._rotation = np.array([[1, 0, 0],
-                                   [0, 1, 0],
-                                   [0, 0, 1]])
-        self._position = np.array([-0.335, -0.035, 0.78])
-        pose = Pose(self._rotation, self._position)
-
-        return pose.transform(omega_sensor)
+        time_delta = np.diff(self.time)
+        return np.stack((time_delta, yaw), axis=1)
 
 
-@numba.njit()
-def abs_max(x) -> np.ndarray:
-    """
-    Reduces along the second dimension, keeping the element with the higher absolute value
-
-    Args:
-        x: a numpy array with shape (n, 2)
-
-    Returns:
-        a 1d numpy array
-    """
-    abs_x = np.abs(x)
-    result = np.zeros(len(x))
-    for i in range(len(x)):
-        if abs_x[i, 1] > abs_x[i, 0]:
-            result[i] = x[i, 1]
-        else:
-            result[i] = x[i, 0]
-    return result
-
-
-def _get_update(distance, wheel_base) -> np.ndarray:
+def _get_update(distance) -> np.ndarray:
     """
     Compute the x, y, and angular translation over each time step
     Uses the Euler approximation (treats movements as linear, instead of as an arc)
@@ -166,26 +165,21 @@ def _get_update(distance, wheel_base) -> np.ndarray:
     
     Args:
         distance: distance traveled by each wheel in each time step
-        wheel_base: distance between the two wheels
 
     Returns:
-        [x_delta, y_delta, theta_delta]
+        translated distance of the center of the vehicle
     """
     # difference between right and left count in a time step
     distance_diff = np.diff(distance, axis=1).squeeze()
-
-    theta = distance_diff / wheel_base
-    v = distance_diff / 2
-    x = v * np.cos(theta)
-    y = v * np.sin(theta)
-    return np.stack([x, y, theta], axis=1)
+    center_arc = distance_diff / 2
+    return center_arc
 
 
 class Encoder(Sensor):
     def __init__(self, data_file='data/sensor_data/encoder.csv'):
         self.time, counts = utils.read_data_from_csv(data_file)
-        some_data = self._pre_process(counts)
-        self._data = dict(zip(self.time, some_data))
+        deltas = self._pre_process(counts)
+        self._data = dict(zip(self.time, deltas))
 
     def _pre_process(self, counts) -> np.ndarray:
         """
@@ -198,7 +192,7 @@ class Encoder(Sensor):
         * The encoder data is stored as [timestamp, left count, right count].
 
         Returns:
-            The vehicle's velocity and angular velocity
+            [dt, dx, dy, dtheta]
         """
         self._resolution = 4096
         self._diameter = (0.623479, 0.623479)
@@ -212,15 +206,41 @@ class Encoder(Sensor):
         assert counts_delta.shape == (len(counts) - 1, 2)
         assert len(counts_delta) == len(time_delta)
 
-        _get_update(counts_delta, self._wheel_base)
+        v = _get_update(counts_delta * cal) / time_delta
+        return v
 
 
 class Car:
-    def __init__(self, n_particles):
-        n_dims = 3
-        self.rotation = np.stack([np.eye(n_dims)] * n_particles, axis=0)
+    def __init__(self, n_particles, v_var, omega_var):
+        self.v_var = v_var
+        self.omega_var = omega_var
+        self.n_particles = n_particles
+
+        n_dims = 2
+        self.yaw = np.zeros(n_particles)
         self.position = np.zeros((n_particles, n_dims))
         self.weights = np.ones((n_particles,)) / n_particles
+
+        self.velocity = 0.
+
+    def __len__(self):
+        return self.n_particles
+
+    def resample(self):
+        pass
+
+    def predict(self, yaw, time_step):
+        v_noise = np.random.normal(loc=0, scale=self.v_var, size=len(self))
+        omega_noise = np.random.normal(loc=0, scale=self.omega_var, size=len(self))
+
+        translation = time_step * (self.velocity + v_noise)
+        dx = translation * np.cos(yaw)
+        dy = translation * np.sin(yaw)
+        dtheta = yaw + time_step * omega_noise
+
+        self.position[:, 0] += dx
+        self.position[:, 1] += dy
+        self.yaw += dtheta
 
     def transform(self, x):
         """
@@ -244,7 +264,7 @@ class Car:
             a Pose object
         """
         idx = np.argmax(self.weights)
-        return Pose(self.rotation[idx], self.position[idx])
+        return Pose(self.yaw[idx], self.position[idx])
 
     @property
     def pose(self) -> Pose:
@@ -254,7 +274,7 @@ class Car:
         Returns:
             # a Pose object
         """
-        return Pose(self.rotation, self.position)
+        return Pose(self.yaw, self.position)
 
 
 @numba.njit(parallel=True, fastmath=True)
@@ -318,6 +338,8 @@ class Map:
                                 int(np.ceil(np.diff(y_range)) / resolution + 1)])
         self._map = np.zeros(self._shape, dtype=np.float)
 
+        self.initialized = False
+
     @property
     def minima(self):
         """x_min, y_min"""
@@ -374,6 +396,7 @@ class Map:
         Returns:
             None
         """
+        self.initialized = True
         assert scan.shape[-1] == 2, "drop the z-dimension for mapping"
         assert origin.shape[-1] == 2, "drop the z-dimension for mapping"
         scan_cells = self.coord_to_cell(scan)
@@ -439,12 +462,12 @@ class Runner:
     A runner class that processes sensor inputs and appropriately updates the car and map objects.
     """
 
-    def __init__(self, encoder: Encoder, gyro: Gyro, lidar: Lidar, car: Car, map: Map):
+    def __init__(self, encoder: Encoder, gyro: Gyro, lidar: Lidar, car: Car, map_: Map):
         self.encoder = encoder
         self.gyro = gyro
         self.lidar = lidar
         self.car = car
-        self.map = map
+        self.map = map_
 
         self.execution_seq = self.get_execution_sequence()
 
@@ -470,13 +493,27 @@ class Runner:
         return execution_sequence
 
     def step_gyro(self, timestamp):
-        pass
+        time_step, yaw = self.gyro[timestamp]
+        self.car.predict(time_step, yaw)
 
     def step_encoder(self, timestamp):
-        pass
+        """
+        Only use the velocity data from the encoder.
+        Do no state updates other than the car velocity.
+
+        Args:
+            timestamp: the encoder timestamp
+        """
+        v = self.encoder[timestamp]
+        self.car.velocity = v
 
     def step_lidar(self, timestamp):
         scan_body = self.lidar[timestamp]
+        if self.map.initialized:
+            # todo: compute correllation
+            pass
+
+        # Update map according to the maximum likelihood pose of the car
         car_pose = self.car.ml_pose
         scan_world = car_pose.transform(scan_body)
         self.map.process_lidar(scan=scan_world[:, :2], origin=car_pose.position[:2])

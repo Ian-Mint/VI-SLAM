@@ -94,7 +94,7 @@ class TestEncoderUpdate(unittest.TestCase):
             else:
                 distance[i, :] = np.array([cr[i], cl[i]])
 
-        result = sensors._get_update(distance, L)
+        result = sensors._get_update(distance)
         # x
         self.assertTrue(np.allclose(expected[:, 0], result[:, 0], atol=1))
         # y
@@ -118,7 +118,7 @@ class TestRunner(unittest.TestCase):
             MockEncoder(),
             MockGyro(),
             Lidar(data_file='data/test/lidar.csv'),
-            Car(n_particles=100),
+            Car(n_particles=100, v_var=1e-3, omega_var=1e-6),
             Map(),
         )
         runner.step_gyro = MagicMock(runner.step_gyro)
@@ -134,7 +134,7 @@ class TestRunner(unittest.TestCase):
             MockEncoder(),
             MockGyro(),
             Lidar(data_file='data/sensor_data/lidar.csv'),
-            Car(n_particles=100),
+            Car(n_particles=100, v_var=1e-3, omega_var=1e-6),
             Map(),
         )
         runner.step_gyro = MagicMock(runner.step_gyro)
@@ -145,6 +145,24 @@ class TestRunner(unittest.TestCase):
         runner.run()
         iteration_duration = (time.time() - start) / lidar_len
         print(f'single scan time {iteration_duration :04f}')
+
+    def test_dead_reckoning(self):
+        runner = self.run_dead_reckoning()
+        # todo: visualize dead reckoning
+
+    @staticmethod
+    @patch('sensors.Lidar')
+    def run_dead_reckoning(MockLidar):
+        runner = Runner(
+            Encoder(data_file='data/test/encoder.csv'),
+            Gyro(data_file='data/test/gyro.csv'),
+            MockLidar(data_file='data/test/lidar.csv'),
+            Car(n_particles=100, v_var=1e-3, omega_var=1e-6),
+            Map(),
+        )
+        runner.step_lidar = MagicMock(runner.step_lidar)
+        runner.run()
+        return runner
 
 
 if __name__ == '__main__':
