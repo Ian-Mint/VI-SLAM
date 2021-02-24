@@ -174,16 +174,11 @@ def _get_update(distance, wheel_base) -> np.ndarray:
     # difference between right and left count in a time step
     distance_diff = np.diff(distance, axis=1).squeeze()
 
-    # compute intermediate values that are used in more than one calc
-    differential_ratio = distance_diff / (2 * wheel_base)
-    # compute theta. TODO: drop the five lines under theta after testing
-    theta = np.pi - 2 * np.arccos(differential_ratio)
-
-    greater_distance = abs_max(distance)
-    x_delta = theta * (1 / (2 * differential_ratio) - 2 * differential_ratio) * greater_distance
-    y_delta = theta * np.sqrt(1 - differential_ratio ** 2) * greater_distance
-
-    return np.stack([x_delta, y_delta, theta], axis=1)
+    theta = distance_diff / wheel_base
+    v = distance_diff / 2
+    x = v * np.cos(theta)
+    y = v * np.sin(theta)
+    return np.stack([x, y, theta], axis=1)
 
 
 class Encoder(Sensor):

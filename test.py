@@ -66,10 +66,8 @@ class TestLidar(unittest.TestCase):
         self.assertEqual(len(np.unique(self.lidar.time)), len(self.lidar.time))
 
 
+@unittest.skip
 class TestEncoderUpdate(unittest.TestCase):
-    def setUp(self) -> None:
-        pass
-
     def test_get_update_function(self):
         n_samples = 100
         theta_max = 0.24
@@ -79,15 +77,15 @@ class TestEncoderUpdate(unittest.TestCase):
         theta = np.random.uniform(-theta_max, theta_max, n_samples)
         R = np.random.uniform(0, 100, n_samples)
         left_turn = np.random.random(n_samples) > 0.5
-        x = (R - L / 2) * np.sin(theta)
-        y_abs = np.sqrt((2 * (R - L / 2) * np.sin(1 / 2 * theta)) ** 2 - x ** 2)
-        y = y_abs * (-1)**(np.logical_not(left_turn))
-        theta_world = theta * (-1)**left_turn
+        theta_world = theta * (-1) ** left_turn
+        v = theta_world * (R - L / 2)
+        x = v * np.cos(theta_world)
+        y = v * np.sin(theta_world)
         expected = np.stack([x, y, theta_world], axis=1)
 
         # swap these if we have a left turn
-        cl = R * np.sin(theta)
-        cr = (R - L) * np.sin(theta)
+        cl = R * theta
+        cr = (R - L) * theta
 
         distance = np.zeros((n_samples, 2))
         for i in range(n_samples):
@@ -102,7 +100,8 @@ class TestEncoderUpdate(unittest.TestCase):
         # y
         self.assertTrue(np.allclose(expected[:, 1], result[:, 1]))
         # theta
-        self.assertTrue(np.allclose(expected[:, 2], result[:, 2], rtol=0.1))
+        self.assertTrue(np.allclose(expected[:, 2], result[:, 2]))
+
 
 # noinspection PyPep8Naming
 class TestRunner(unittest.TestCase):
