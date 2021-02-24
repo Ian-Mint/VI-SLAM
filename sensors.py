@@ -137,6 +137,55 @@ class Gyro(Sensor):
         return pose.transform(omega_sensor)
 
 
+@numba.njit()
+def abs_max(x) -> np.ndarray:
+    """
+    Reduces along the second dimension, keeping the element with the higher absolute value
+
+    Args:
+        x: a numpy array with shape (n, 2)
+
+    Returns:
+        a 1d numpy array
+    """
+    abs_x = np.abs(x)
+    result = np.zeros(len(x))
+    for i in range(len(x)):
+        if abs_x[i, 1] > abs_x[i, 0]:
+            result[i] = x[i, 1]
+        else:
+            result[i] = x[i, 0]
+    return result
+
+
+def _get_update(distance, wheel_base) -> np.ndarray:
+    """
+    Compute the x, y, and angular translation over each time step
+    Uses the Euler approximation (treats movements as linear, instead of as an arc)
+
+    
+    Args:
+        distance: distance traveled by each wheel in each time step
+        wheel_base: distance between the two wheels
+
+    Returns:
+        [x_delta, y_delta, theta_delta]
+    """
+    # difference between right and left count in a time step
+    distance_diff = np.diff(distance, axis=1).squeeze()
+
+    # compute intermediate values that are used in more than one calc
+    differential_ratio = distance_diff / (2 * wheel_base)
+    # compute theta. TODO: drop the five lines under theta after testing
+    theta = np.pi - 2 * np.arccos(differential_ratio)
+
+    greater_distance = abs_max(distance)
+    x_delta = theta * (1 / (2 * differential_ratio) - 2 * differential_ratio) * greater_distance
+    y_delta = theta * np.sqrt(1 - differential_ratio ** 2) * greater_distance
+
+    return np.stack([x_delta, y_delta, theta], axis=1)
+
+
 class Encoder(Sensor):
     def __init__(self, data_file='data/sensor_data/encoder.csv'):
         self.time, counts = utils.read_data_from_csv(data_file)
@@ -156,7 +205,19 @@ class Encoder(Sensor):
         Returns:
             The vehicle's velocity and angular velocity
         """
-        return None
+        self._resolution = 4096
+        self._diameter = (0.623479, 0.623479)
+        self._wheel_base = 1.52439
+
+        # calibration constants, (m/count)
+        cal = np.pi * np.array(self._diameter) / self._resolution
+
+        counts_delta = np.diff(counts, axis=0)
+        time_delta = np.diff(self.time)
+        assert counts_delta.shape == (len(counts) - 1, 2)
+        assert len(counts_delta) == len(time_delta)
+
+        _get_update(counts_delta, self._wheel_base)
 
 
 class Car:
@@ -246,7 +307,6 @@ def _positive_update(scan_cells, map_, increment, lambda_max) -> None:
         # clip upper limit
         if map_[x, y] > lambda_max:
             map_[x, y] = lambda_max
-
 
 
 class Map:
