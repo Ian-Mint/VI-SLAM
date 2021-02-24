@@ -3,12 +3,16 @@ import time
 from typing import List, Tuple, Union
 
 import matplotlib.pyplot as plt
+import matplotlib.animation as animation
 import numpy as np
 import numba
 
 import pr2_utils as utils
 
 __all__ = ['Encoder', 'Gyro', 'Lidar', 'Map', 'Car', 'Runner']
+
+
+np.seterr(divide='raise', invalid='ignore')  # raise an error on divide by zero
 
 
 def softmax(x: np.ndarray) -> np.ndarray:
@@ -21,7 +25,7 @@ def softmax(x: np.ndarray) -> np.ndarray:
     Returns:
         shape x.shape[:-1]
     """
-    return x / np.sum(x, axis=x.ndim - 1, keepdims=True)
+    return x / np.nansum(x, axis=x.ndim - 1, keepdims=True)
 
 
 @numba.njit()
@@ -273,13 +277,14 @@ class Car:
         omega_noise = np.random.normal(loc=0, scale=self.omega_var, size=len(self))
 
         translation = time_step * (self.velocity + v_noise)
-        dx = translation * np.cos(yaw)
-        dy = translation * np.sin(yaw)
         dtheta = yaw + time_step * omega_noise
+        self.yaw += dtheta
+
+        dx = translation * np.cos(self.yaw)
+        dy = translation * np.sin(self.yaw)
 
         self.position[:, 0] += dx
         self.position[:, 1] += dy
-        self.yaw += dtheta
 
     def transform_ml(self, x):
         """
@@ -391,7 +396,7 @@ def _positive_update(scan_cells, map_, increment, lambda_max) -> None:
 
 class Map:
     def __init__(self, resolution=0.1, x_range=(-50, 50), y_range=(-50, 50), lambda_max_factor=100):
-        assert isinstance(resolution, float)
+        resolution = float(resolution)
         self.resolution = resolution
         self._range = np.array([x_range, y_range])
 
@@ -540,9 +545,11 @@ class Map:
         Returns:
             shape (n_particles)
         """
-        valid_scan_cells = self.get_valid_scan_cells(scan)
-        selected_map_cells = self.ml_map[valid_scan_cells[..., 0], valid_scan_cells[..., 1]]
-        corr = np.sum(selected_map_cells.reshape((len(scan), -1)), axis=1)
+        corr = np.zeros(len(scan))
+        for i, particle_scan in enumerate(scan):
+            valid_scan_cells = self.get_valid_scan_cells(scan)
+            selected_map_cells = self.ml_map[valid_scan_cells[..., 0], valid_scan_cells[..., 1]]
+            corr[i] = np.sum(selected_map_cells)
         assert len(corr) == len(scan)
         assert corr.ndim == 1
         return corr
@@ -575,7 +582,7 @@ class Runner:
         self.map = map_
         self._figure = None
         self._ax = None
-        self._fig_handle = None
+        self._animation = None
 
         self.execution_seq = self.get_execution_sequence()
 
@@ -586,7 +593,7 @@ class Runner:
         print("Run starting")
         report_iterations = int(1e6)
 
-        # enumerate for debugging
+        self.animate(0)
         start = time.time()
         for i, (timestamp, executor) in enumerate(self.execution_seq):
             executor(timestamp)
@@ -594,7 +601,7 @@ class Runner:
                 print(f'Sample {i // report_iterations} million in {time.time() - start: 02f}s')
                 start = time.time()
 
-    def plot(self):
+    def animate(self, i):
         max_value = 255
         red = np.array([max_value, 0, 0])
         map_ = (self.map.ml_map_for_plot * max_value).astype(np.int)
@@ -605,13 +612,13 @@ class Runner:
 
         if self._figure is None:
             self._figure = plt.figure()
-            self._ax = self._figure.gca()
-            self._fig_handle = self._ax.imshow(map_)
+            self._ax = self._figure.add_subplot(1, 1, 1)
+            self._ax.imshow(map_)
+            self._animation = animation.FuncAnimation(self._figure, self.animate, interval=1000)
             self._figure.show()
         else:
-            self._fig_handle.set_data(map_)
-        self._ax.set_title(f"map")
-        self._figure.canvas.draw()
+            plt.pause(0.01)
+            self._ax.imshow(map_)
 
     def get_execution_sequence(self) -> np.ndarray:
         """
@@ -662,9 +669,6 @@ class Runner:
         car_pose = self.car.ml_pose
         scan_world = car_pose.transform(scan_body)
         self.map.update(scan=scan_world[:, :2], origin=car_pose.position)
-
-        if (self.map.update_count + 1) % self.plot_interval == 0:
-            self.plot()
 
     def _get_correlation(self, scan_body) -> np.ndarray:
         scan_world = self.car.transform_all(scan_body)
