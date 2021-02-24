@@ -110,8 +110,11 @@ class Lidar(Sensor):
     * LiDAR rays with value 0.0 represent infinite range observations.
     """
 
-    def __init__(self, data_file='data/sensor_data/lidar.csv'):
+    def __init__(self, data_file='data/sensor_data/lidar.csv', downsample=1):
         self.time, scans = utils.read_data_from_csv(data_file)
+        self.time = self.time[::downsample]
+        scans = scans[::downsample]
+
         self._max_range = 75.
         self._min_range = 2.
 
