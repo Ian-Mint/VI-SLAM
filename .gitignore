@@ -5,3 +5,4 @@ bin_detection/data.bak*
 data/*
 *.ipynb
 .idea/
+*.png

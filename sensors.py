@@ -477,7 +477,7 @@ class Map:
     @property
     def ml_map(self):
         ml_map = np.zeros_like(self._map, dtype=bool)
-        ml_map[self._map > 0] = 1
+        ml_map[self._map > 0] = True
         return ml_map
 
     @property
@@ -497,7 +497,7 @@ class Map:
         """
         self.update_count += 1
         origin_cell = coord_to_cell(origin, self.minima, self.resolution)
-        assert self.is_in_map(origin_cell), "origin is outside the map"
+        assert self.is_in_map(origin_cell), f"origin is outside the map {origin}"
         valid_scan_cells = self.get_valid_scan_cells(scan)
 
         _positive_update(valid_scan_cells, self._map, self._increment, self._lambda_max)
@@ -623,7 +623,7 @@ class Runner:
     def plot(self):
         map_ = self.get_map_with_particles()
 
-        plt.imshow(map_)
+        plt.imshow(map_, origin='lower')
         plt.show()
 
     def get_map_with_particles(self):
