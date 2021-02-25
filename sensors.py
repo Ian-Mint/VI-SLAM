@@ -96,7 +96,10 @@ class Sensor(ABC):
             Sensor output
         """
         # noinspection PyUnresolvedReferences
-        return self._data.get(item, None)
+        data = self._data.get(item, None)
+        if data is None:
+            print(f'Missed key {item}')
+        return data
 
 
 class Lidar(Sensor):
