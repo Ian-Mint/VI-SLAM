@@ -598,6 +598,8 @@ class Runner:
         self._animation = None
         self._fig_handle = None
 
+        self._plot_number = 0
+
         self.execution_seq = self.get_execution_sequence()
 
     def __len__(self):
@@ -614,6 +616,7 @@ class Runner:
             if (i + 1) % report_iterations == 0:
                 print(f'Sample {(i + 1) // 1000} thousand in {time.time() - start: 02f}s')
                 start = time.time()
+        self.plot()
 
     def plot_continuous(self):
         map_ = self.get_map_with_particles()
@@ -625,13 +628,17 @@ class Runner:
             self._figure.show()
         else:
             self._fig_handle.set_data(map_)
-        self._ax.set_title(f"map")
         self._figure.canvas.draw()
 
     def plot(self):
+        self._plot_number += 1
         map_ = self.get_map_with_particles()
 
-        plt.imshow(map_, origin='lower')
+        plt.imshow(map_, origin='lower', extent=[*self.map.x_range, *self.map.y_range])
+        plt.title("Map")
+        plt.xlabel("x distance from start (m)")
+        plt.ylabel("y distance from start (m)")
+        plt.savefig(f'results/map{self._plot_number}.png')
         plt.show()
 
     def get_map_with_particles(self):
@@ -641,7 +648,7 @@ class Runner:
         map_ = np.stack([map_] * 3, axis=2)
         particles = self.map.coord_to_cell(self.car.position)
         map_[particles[:, 0], particles[:, 1], :] = red
-        return map_
+        return np.transpose(map_, (1, 0, 2))
 
     def get_execution_sequence(self) -> np.ndarray:
         """
