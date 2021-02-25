@@ -13,7 +13,7 @@ if __name__ == '__main__':
         Gyro(),
         Lidar(downsample=1),
         Car(n_particles=20, v_var=1e-8, omega_var=1e-10, resample_threshold=0.8),  # variance in m/nanosecond
-        Map(resolution=2., x_range=(-200, 1600), y_range=(-1300, 200), lambda_max_factor=100, increment=16,
+        Map(resolution=2., x_range=(-100, 1400), y_range=(-1200, 100), lambda_max_factor=100, increment=16,
             decrement=4),
         downsample=1,
         plot_interval=1000000000000

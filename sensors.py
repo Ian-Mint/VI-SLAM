@@ -598,13 +598,13 @@ class Runner:
 
     def run(self):
         print("Run starting")
-        report_iterations = int(1e6)
+        report_iterations = int(1e5)
 
         start = time.time()
         for i, (timestamp, executor) in enumerate(self.execution_seq):
             executor(timestamp)
             if (i + 1) % report_iterations == 0:
-                print(f'Sample {i // report_iterations} million in {time.time() - start: 02f}s')
+                print(f'Sample {(i + 1) // 1000} thousand in {time.time() - start: 02f}s')
                 start = time.time()
 
     def plot_continuous(self):
