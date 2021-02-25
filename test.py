@@ -76,7 +76,7 @@ class TestRunner(unittest.TestCase):
     @patch('sensors.Encoder')
     @patch('sensors.Gyro')
     def run_lidar_single_line(MockEncoder, MockGyro):
-        runner = Runner(MockEncoder(), MockGyro(), Lidar(data_file='data/test/lidar.csv'),
+        runner = Runner(Camera(), MockEncoder(), MockGyro(), Lidar(data_file='data/test/lidar.csv'),
                         Car(n_particles=100, v_var=1e-3, omega_var=1e-6, resample_threshold=0.5), Map())
         runner.step_gyro = MagicMock(runner.step_gyro)
         runner.step_encoder = MagicMock(runner.step_encoder)
@@ -87,7 +87,7 @@ class TestRunner(unittest.TestCase):
     @patch('sensors.Encoder')
     @patch('sensors.Gyro')
     def test_lidar_time(self, MockEncoder, MockGyro):
-        runner = Runner(MockEncoder(), MockGyro(), Lidar(data_file='data/sensor_data/lidar.csv'),
+        runner = Runner(Camera(), MockEncoder(), MockGyro(), Lidar(data_file='data/sensor_data/lidar.csv'),
                         Car(n_particles=100, v_var=1e-3, omega_var=1e-6, resample_threshold=0.5), Map())
         runner.step_gyro = MagicMock(runner.step_gyro)
         runner.step_encoder = MagicMock(runner.step_encoder)
@@ -105,7 +105,7 @@ class TestRunner(unittest.TestCase):
     @staticmethod
     @patch('sensors.Lidar')
     def run_dead_reckoning(MockLidar):
-        runner = Runner(Encoder(data_file='data/test/encoder.csv'), Gyro(data_file='data/test/gyro.csv'),
+        runner = Runner(Camera(), Encoder(data_file='data/test/encoder.csv'), Gyro(data_file='data/test/gyro.csv'),
                         MockLidar(data_file='data/test/lidar.csv'),
                         Car(n_particles=100, v_var=1e-3, omega_var=1e-6, resample_threshold=0.5), Map())
         runner.step_lidar = MagicMock(runner.step_lidar)

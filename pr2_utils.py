@@ -32,7 +32,7 @@ def compute_stereo():
     image_r_gray = cv2.cvtColor(image_r, cv2.COLOR_BGR2GRAY)
 
     # You may need to fine-tune the variables `numDisparities` and `blockSize` based on the desired accuracy
-    stereo = cv2.StereoBM_create(numDisparities=32, blockSize=9)
+    stereo = cv2.StereoBM_create(numDisparities=16, blockSize=51)
     disparity = stereo.compute(image_l_gray, image_r_gray)
 
     fig, (ax1, ax2, ax3) = plt.subplots(3, 1)
@@ -267,7 +267,7 @@ def show_lidar():
 
 
 if __name__ == '__main__':
-    # compute_stereo()
+    compute_stereo()
     # show_lidar()
     # test_mapCorrelation()
-    test_bresenham2D()
+    # test_bresenham2D()

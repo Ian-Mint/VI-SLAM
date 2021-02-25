@@ -1,14 +1,16 @@
 import time
 from abc import ABC
 from typing import List, Tuple, Union
+import os
 
+import cv2
 import matplotlib.pyplot as plt
 import numba
 import numpy as np
 
 import pr2_utils as utils
 
-__all__ = ['Encoder', 'Gyro', 'Lidar', 'Map', 'Car', 'Runner']
+__all__ = ['Camera', 'Encoder', 'Gyro', 'Lidar', 'Map', 'Car', 'Runner']
 
 np.seterr(divide='raise', invalid='ignore')  # raise an error on divide by zero
 
@@ -54,8 +56,10 @@ class Pose:
             else:
                 self.rotation = r_2d(np.array([rotation])).squeeze()
         self.position = position
-        assert self.rotation.ndim - 1 == self.position.ndim
-        assert self.rotation.ndim in {2, 3}
+        self.ndim = self.rotation.ndim
+        self.size = position.shape[-1]
+        assert self.ndim - 1 == self.position.ndim
+        assert self.ndim in {2, 3}
         assert len(self.rotation) == len(self.position)
 
     def transform(self, x) -> np.ndarray:
@@ -68,9 +72,9 @@ class Pose:
             transformed coordinates. in dimensions (n_particles, n_points, 2)
         """
         rotated = x @ self.rotation.T
-        if self.rotation.ndim > 2:
+        if self.ndim > 2:
             rotated = rotated.T
-        if self.rotation.ndim > 2 and x.ndim > 1:
+        if self.ndim > 2 and x.ndim > 1:
             return rotated + np.expand_dims(self.position, axis=1)
         else:
             return rotated + self.position
@@ -422,6 +426,100 @@ def coord_to_cell(point: np.ndarray, minima: np.ndarray, resolution: float) -> n
     return np.ceil((point - minima) / resolution).astype(np.int16) - 1
 
 
+# @numba.njit()
+def get_coords(disparity) -> np.ndarray:
+    """
+    Return xyz coordinates in the camera frame associated with each pixel
+
+    Args:
+        disparity: the disparity image
+
+    Returns:
+        h*w x 3 array
+    """
+    b = 475.143600050775 / 1000
+    fsu = 7.7537235550066748e+02
+    cu = 6.1947309112548828e+02
+    cv = 2.5718049049377441e+02
+
+    height, width = disparity.shape
+
+    u = np.arange(width)
+    v = np.arange(height)
+
+    z = fsu * b / disparity
+    y = np.expand_dims((v - cv) / fsu, axis=1) * z
+    x = np.expand_dims((u - cu) / fsu, axis=0) * z
+    return np.stack([x, y, z], axis=2)
+
+
+class Camera(Sensor):
+    def __init__(self, root='data/stereo_images'):
+        self._root = root
+        self._left_dir = 'stereo_left'
+        self._right_dir = 'stereo_right'
+
+        self.pose = self._get_pose()
+
+        window_size = 3
+        min_disp = 16
+        num_disp = 112 - min_disp
+        self._stereo = cv2.StereoSGBM_create(
+            minDisparity=min_disp,
+            numDisparities=num_disp,
+            blockSize=51,
+            P1=8 * 3 * window_size ** 2,
+            P2=32 * 3 * window_size ** 2,
+            disp12MaxDiff=1,
+            uniquenessRatio=10,
+            speckleWindowSize=100,
+            speckleRange=32
+        )
+
+        self.time = self.get_timestamps()
+
+    def __getitem__(self, item):
+        stereo_set = self.load_images(
+            [os.path.join(self._root, self._left_dir, f'{item}.png'),
+             os.path.join(self._root, self._right_dir, f'{item}.png')])
+        img = stereo_set[0]
+        disparity = self._stereo.compute(*stereo_set).astype(np.float32) / 16.0
+        valid = disparity > disparity.min()
+
+        camera_coords = get_coords(disparity)
+
+        pixels = img[valid]
+        camera_coords = camera_coords[valid]
+        assert pixels.shape[0] == camera_coords.shape[0]
+
+        coords = self.pose.transform(camera_coords)
+        return coords, pixels
+
+    def get_timestamps(self):
+        filenames = os.listdir(os.path.join(self._root, self._left_dir))
+        timestamps = [int(fn[:-4]) for fn in filenames]
+        return timestamps
+
+    @staticmethod
+    def load_images(paths: List[str]):
+        return [cv2.imread(p, 0) for p in paths]
+
+    @staticmethod
+    def _get_pose():
+        """
+        Stereo camera (based on left camera) extrinsic calibration parameter from vehicle
+        RPY(roll/pitch/yaw = XYZ extrinsic, degree), R(rotation matrix), T(translation matrix)
+        RPY: -90.878 0.0132 -90.3899
+        R: -0.00680499 -0.0153215 0.99985 -0.999977 0.000334627 -0.00680066 -0.000230383 -0.999883 -0.0153234
+        T: 1.64239 0.247401 1.58411
+        """
+        rotation = np.array([[-0.00680499, -0.0153215, 0.99985],
+                             [-0.999977, 0.000334627, -0.00680066],
+                             [-0.000230383, -0.999883, -0.0153234]])
+        position = np.array([1.64239, 0.247401, 1.58411])
+        return Pose(rotation, position)
+
+
 class Map:
     def __init__(self, resolution=0.1, x_range=(-50, 50), y_range=(-50, 50), lambda_max_factor=100, increment=16,
                  decrement=4):
@@ -435,7 +533,9 @@ class Map:
         self._lambda_min = -self._decrement * lambda_max_factor
         self._shape = np.array([int(np.ceil(np.diff(x_range) / resolution + 1)),
                                 int(np.ceil(np.diff(y_range)) / resolution + 1)])
+
         self._map = np.zeros(self._shape, dtype=np.float)
+        self.texture = np.zeros(shape=self._shape, dtype=np.uint8) + 127
 
         self.update_count = 0
 
@@ -462,6 +562,9 @@ class Map:
     @property
     def likelihood(self):
         return np.exp(self._map) / (1 + np.exp(self._map))
+    
+    def color(self, cells, pixels):
+        self.texture[cells[:, 0], cells[:, 1]] = pixels
 
     def show_likelihood(self, title):
         plt.imshow(self.likelihood, cmap='gray')
@@ -573,10 +676,11 @@ class Runner:
     A runner class that processes sensor inputs and appropriately updates the car and map objects.
     """
 
-    def __init__(self, encoder: Encoder, gyro: Gyro, lidar: Lidar, car: Car, map_: Map, downsample: int = 1,
-                 plot_interval=0):
+    def __init__(self, camera: Camera, encoder: Encoder, gyro: Gyro, lidar: Lidar, car: Car, map_: Map, downsample: int = 1,
+                 plot_interval=0, plot_type='occupancy'):
         """
         Args:
+            camera: Camera object
             encoder: Encoder object
             gyro: Gyro object
             lidar: Lidar object
@@ -584,10 +688,14 @@ class Runner:
             map_: Map object
             downsample: Factor by which to downsample. default=1, i.e. no down-sampling
             plot_interval: Interval at which to update the map plot
+            plot_type: one of ('occupancy', 'texture')
         """
+
         assert isinstance(downsample, int)
         self.plot_interval = plot_interval
         self.downsample = downsample
+
+        self.camera = camera
         self.encoder = encoder
         self.gyro = gyro
         self.lidar = lidar
@@ -599,6 +707,9 @@ class Runner:
         self._fig_handle = None
 
         self._plot_number = 0
+        plotter = {'occupancy': self.plot_occupancy,
+                   'texture': self.plot_texture}
+        self.plot = plotter[plot_type]
 
         self.execution_seq = self.get_execution_sequence()
 
@@ -630,10 +741,21 @@ class Runner:
             self._fig_handle.set_data(map_)
         self._figure.canvas.draw()
 
-    def plot(self):
+    def plot_occupancy(self):
         self._plot_number += 1
         map_ = self.get_map_with_particles()
 
+        plt.imshow(map_, origin='lower', extent=[*self.map.x_range, *self.map.y_range])
+        plt.title("Map")
+        plt.xlabel("x distance from start (m)")
+        plt.ylabel("y distance from start (m)")
+        plt.savefig(f'results/map{self._plot_number}.png')
+        plt.show()
+
+    def plot_texture(self):
+        self._plot_number += 1
+        map_ = self.map.texture
+        
         plt.imshow(map_, origin='lower', extent=[*self.map.x_range, *self.map.y_range])
         plt.title("Map")
         plt.xlabel("x distance from start (m)")
@@ -654,6 +776,7 @@ class Runner:
         """
         Create a numpy array consisting of (timestamp, executor) pairs, sorted by timestamp.
         """
+        camera_time = self.camera.time
         gyro_time = self.gyro.time
         encoder_time = self.encoder.time
         lidar_time = self.lidar.time
@@ -663,9 +786,10 @@ class Runner:
             lidar_time = gyro_time[0::self.downsample]
             encoder_time = encoder_time[0::self.downsample]
 
-        timestamps = np.concatenate((encoder_time, gyro_time, lidar_time), axis=0)
+        timestamps = np.concatenate([camera_time, encoder_time, gyro_time, lidar_time], axis=0)
         assert timestamps.ndim == 1
-        executors = np.concatenate(([self.step_encoder] * len(encoder_time),
+        executors = np.concatenate(([self.step_camera] * len(camera_time),
+                                    [self.step_encoder] * len(encoder_time),
                                     [self.step_gyro] * len(gyro_time),
                                     [self.step_lidar] * len(lidar_time)), axis=0)
         execution_sequence = np.stack((timestamps, executors), axis=1)
@@ -673,6 +797,32 @@ class Runner:
         assert np.all(execution_sequence[1:, 0] >= execution_sequence[:-1, 0])
         assert execution_sequence.shape == (len(timestamps), 2)
         return execution_sequence
+
+    def step_camera(self, timestamp):
+        z_min = 0.
+        z_max = 2.
+
+        body_coords, pixels = self.camera[timestamp]
+
+        valid = np.logical_and(body_coords[..., 2] > z_min, body_coords[..., 2] < z_max)
+        body_coords = body_coords[valid, :-1]  # filter and drop the z-dimension
+        pixels = pixels[valid]
+
+        pose = self.car.ml_pose
+        world_coords = pose.transform(body_coords)
+        cells = self.map.coord_to_cell(world_coords)
+
+        averaged_pixels, unique_cells = self.average_colors_in_each_cell(cells, pixels)
+
+        self.map.color(unique_cells, averaged_pixels)
+
+    @staticmethod
+    def average_colors_in_each_cell(cells, pixels):
+        unique_cells, inverse = np.unique(cells, return_inverse=True, axis=0)
+        averaged_pixels = np.zeros(len(unique_cells), dtype=np.uint8)
+        for index in range(len(unique_cells)):
+            averaged_pixels[index] = pixels[inverse == index].mean().astype(np.uint8)
+        return averaged_pixels, unique_cells
 
     def step_gyro(self, timestamp):
         data = self.gyro[timestamp]
