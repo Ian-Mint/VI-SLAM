@@ -261,6 +261,13 @@ class Car:
 
         self.velocity = 0.
 
+    def re_init(self):
+        self.yaw = np.zeros_like(self.yaw)
+        self.position = np.zeros_like(self.position)
+        self.weights = self.uniform_prior()
+
+        self.velocity = 0.
+
     def uniform_prior(self):
         n_particles = self.n_particles
         return np.ones((n_particles,)) / n_particles
@@ -597,6 +604,7 @@ class Runner:
         return len(self.execution_seq)
 
     def run(self):
+        self.car.re_init()
         print("Run starting")
         report_iterations = int(1e5)
 
@@ -692,7 +700,7 @@ class Runner:
         self.map.update(scan=scan_world[:, :2], origin=car_pose.position)
 
         if (self.map.update_count + 1) % self.plot_interval == 0:
-            self.plot_continuous()
+            self.plot()
 
     def _get_correlation(self, scan_body) -> np.ndarray:
         scan_world = self.car.transform_all(scan_body)
