@@ -10,14 +10,13 @@ if __name__ == '__main__':
     runner = Runner(
         Encoder(),
         Gyro(),
-        Lidar(downsample=2),  # skip every other sample
-        Car(n_particles=100, v_var=1e-9, omega_var=1e-10, resample_threshold=0.5),  # variance in m/nanosecond
-        Map(resolution=1., x_range=(-100, 1300), y_range=(-1200, 200), lambda_max_factor=100),
+        Lidar(downsample=1),
+        Car(n_particles=10, v_var=1e-9, omega_var=1e-10, resample_threshold=0.5),  # variance in m/nanosecond
+        Map(resolution=2., x_range=(-200, 1300), y_range=(-1300, 200), lambda_max_factor=100, increment=16,
+            decrement=4),
         downsample=1,
-        plot_interval=1000
+        plot_interval=1000000000000
     )
-    try:
-        runner.run()
-    except KeyboardInterrupt:
-        import matplotlib.pyplot as plt
-        plt.show()
+    runner.run()
+    runner.plot()
+    input("Press any key to exit...")

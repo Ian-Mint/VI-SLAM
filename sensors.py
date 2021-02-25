@@ -96,7 +96,7 @@ class Sensor(ABC):
             Sensor output
         """
         # noinspection PyUnresolvedReferences
-        return self._data.pop(item)
+        return self._data.get(item, None)
 
 
 class Lidar(Sensor):
@@ -413,13 +413,14 @@ def coord_to_cell(point: np.ndarray, minima: np.ndarray, resolution: float) -> n
 
 
 class Map:
-    def __init__(self, resolution=0.1, x_range=(-50, 50), y_range=(-50, 50), lambda_max_factor=100):
+    def __init__(self, resolution=0.1, x_range=(-50, 50), y_range=(-50, 50), lambda_max_factor=100, increment=16,
+                 decrement=4):
         resolution = float(resolution)
         self.resolution = resolution
         self._range = np.array([x_range, y_range])
 
-        self._increment = np.log(16)
-        self._decrement = np.log(4)
+        self._increment = np.log(increment)
+        self._decrement = np.log(decrement)
         self._lambda_max = self._increment * lambda_max_factor
         self._lambda_min = -self._decrement * lambda_max_factor
         self._shape = np.array([int(np.ceil(np.diff(x_range) / resolution + 1)),
@@ -549,7 +550,7 @@ class Map:
         ml_map = self.ml_map
         corr = np.zeros(len(scan))
         for i, particle_scan in enumerate(scan):
-            valid_scan_cells = self.get_valid_scan_cells(scan)
+            valid_scan_cells = self.get_valid_scan_cells(particle_scan)
             selected_map_cells = ml_map[valid_scan_cells[..., 0], valid_scan_cells[..., 1]]
             corr[i] = np.sum(selected_map_cells)
         assert len(corr) == len(scan)
@@ -603,14 +604,8 @@ class Runner:
                 print(f'Sample {i // report_iterations} million in {time.time() - start: 02f}s')
                 start = time.time()
 
-    def plot(self):
-        max_value = 255
-        red = np.array([max_value, 0, 0])
-        map_ = (self.map.ml_map_for_plot * max_value).astype(np.int)
-        map_ = np.stack([map_] * 3, axis=2)
-
-        particles = self.map.coord_to_cell(self.car.position)
-        map_[particles[:, 0], particles[:, 1], :] = red
+    def plot_continuous(self):
+        map_ = self.get_map_with_particles()
 
         if self._figure is None:
             self._figure = plt.figure()
@@ -621,6 +616,21 @@ class Runner:
             self._fig_handle.set_data(map_)
         self._ax.set_title(f"map")
         self._figure.canvas.draw()
+
+    def plot(self):
+        map_ = self.get_map_with_particles()
+
+        plt.imshow(map_)
+        plt.show()
+
+    def get_map_with_particles(self):
+        max_value = 255
+        red = np.array([max_value, 0, 0])
+        map_ = (self.map.ml_map_for_plot * max_value).astype(np.int)
+        map_ = np.stack([map_] * 3, axis=2)
+        particles = self.map.coord_to_cell(self.car.position)
+        map_[particles[:, 0], particles[:, 1], :] = red
+        return map_
 
     def get_execution_sequence(self) -> np.ndarray:
         """
@@ -647,8 +657,10 @@ class Runner:
         return execution_sequence
 
     def step_gyro(self, timestamp):
-        time_step, yaw = self.gyro[timestamp]
-        self.car.predict(yaw, time_step)
+        data = self.gyro[timestamp]
+        if data is not None:
+            time_step, yaw = data
+            self.car.predict(yaw, time_step)
 
     def step_encoder(self, timestamp):
         """
@@ -659,10 +671,14 @@ class Runner:
             timestamp: the encoder timestamp
         """
         v = self.encoder[timestamp]
-        self.car.velocity = v
+        if v is not None:
+            self.car.velocity = v
 
     def step_lidar(self, timestamp):
         scan_body = self.lidar[timestamp]
+        if scan_body is None:
+            return
+
         if self.map.update_count > 0:  # ensure there is a map
             correlation = self._get_correlation(scan_body)
             self.car.update(softmax(correlation))
@@ -673,7 +689,7 @@ class Runner:
         self.map.update(scan=scan_world[:, :2], origin=car_pose.position)
 
         if (self.map.update_count + 1) % self.plot_interval == 0:
-            self.plot()
+            self.plot_continuous()
 
     def _get_correlation(self, scan_body) -> np.ndarray:
         scan_world = self.car.transform_all(scan_body)
