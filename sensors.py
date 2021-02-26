@@ -326,7 +326,8 @@ class Car:
         return self.pose.transform(x)
 
     def update(self, new_weights: np.ndarray):
-        self.weights[:] = new_weights
+        self.weights[:] *= new_weights
+        self.weights[:] /= np.sum(self.weights)
         if self.n_eff < self.resample_threshold:
             self.resample()
 
@@ -482,6 +483,9 @@ class Camera(Sensor):
         stereo_set = self.load_images(
             [os.path.join(self._root, self._left_dir, f'{item}.png'),
              os.path.join(self._root, self._right_dir, f'{item}.png')])
+        if any(im is None for im in stereo_set):
+            print(f"No matching image for {item}.png")
+            return
         img = stereo_set[0]
         disparity = self._stereo.compute(*stereo_set).astype(np.float32) / 16.0
         valid = disparity > disparity.min()
@@ -755,12 +759,13 @@ class Runner:
     def plot_texture(self):
         self._plot_number += 1
         map_ = self.map.texture
-        
-        plt.imshow(map_, origin='lower', extent=[*self.map.x_range, *self.map.y_range])
-        plt.title("Map")
+        map_ = map_.T
+
+        plt.imshow(map_, origin='lower', extent=[*self.map.x_range, *self.map.y_range], cmap='gray')
+        plt.title("Texture")
         plt.xlabel("x distance from start (m)")
         plt.ylabel("y distance from start (m)")
-        plt.savefig(f'results/map{self._plot_number}.png')
+        plt.savefig(f'results/texture{self._plot_number:02d}.png')
         plt.show()
 
     def get_map_with_particles(self):
@@ -801,8 +806,11 @@ class Runner:
     def step_camera(self, timestamp):
         z_min = 0.
         z_max = 2.
-
-        body_coords, pixels = self.camera[timestamp]
+        # try:
+        data = self.camera[timestamp]
+        if data is None:
+            return
+        body_coords, pixels = data
 
         valid = np.logical_and(body_coords[..., 2] > z_min, body_coords[..., 2] < z_max)
         body_coords = body_coords[valid, :-1]  # filter and drop the z-dimension
@@ -815,6 +823,8 @@ class Runner:
         averaged_pixels, unique_cells = self.average_colors_in_each_cell(cells, pixels)
 
         self.map.color(unique_cells, averaged_pixels)
+        # except Exception as e:
+        #     print(e)
 
     @staticmethod
     def average_colors_in_each_cell(cells, pixels):
