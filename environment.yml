@@ -9,3 +9,4 @@ dependencies:
   - scipy
   - scikit-image
   - numba
+  - transforms3d
