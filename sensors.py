@@ -1,95 +1,45 @@
+import itertools
 import time
 from abc import ABC
 from typing import List, Tuple, Union
-import os
 
-import cv2
 import matplotlib.pyplot as plt
 import numba
 import numpy as np
+from scipy.linalg import expm
 
-import pr2_utils as utils
-
-__all__ = ['Camera', 'Encoder', 'Gyro', 'Lidar', 'Map', 'Car', 'Runner']
+__all__ = ['Camera', 'Imu', 'Map', 'Vehicle', 'Runner']
 
 np.seterr(divide='raise', invalid='ignore')  # raise an error on divide by zero
 
 
-def softmax(x: np.ndarray) -> np.ndarray:
-    """
-    Softmax function, normalizing over the last axis
+@numba.njit()
+def hat(x):
+    x_hat = np.zeros((4, 4))
 
-    Args:
-        x: numpy array with features in the last dimension
-
-    Returns:
-        shape x.shape[:-1]
-    """
-    return x / np.nansum(x, axis=x.ndim - 1, keepdims=True)
+    x_hat[:3, -1] = x[:3]
+    x_hat[0, 1] = -x[5]
+    x_hat[0, 2] = x[4]
+    x_hat[1, 0] = x[5]
+    x_hat[1, 2] = -x[3]
+    x_hat[2, 0] = -x[4]
+    x_hat[2, 1] = x[3]
+    return x_hat
 
 
 @numba.njit()
-def r_2d(theta: np.ndarray):
-    rotations = np.zeros((len(theta), 2, 2))
-    for i, t in enumerate(theta):
-        rotations[i, 0, 0] = np.cos(t)
-        rotations[i, 0, 1] = -np.sin(t)
-        rotations[i, 1, 0] = np.sin(t)
-        rotations[i, 1, 1] = np.cos(t)
-    return rotations
+def vee(x_hat):
+    x = np.zeros(6)
 
-
-class Pose:
-    def __init__(self, rotation: np.ndarray, position: np.ndarray):
-        """
-
-        Args:
-            rotation: rotation matrix or yaw angles
-            position: positions
-        """
-        if rotation.ndim > 1:
-            assert (rotation.shape[-2], rotation.shape[-1]) == (3, 3)
-            self.rotation = rotation
-        else:
-            if isinstance(rotation, np.ndarray):
-                self.rotation = r_2d(rotation)
-            else:
-                self.rotation = r_2d(np.array([rotation])).squeeze()
-        self.position = position
-        self.ndim = self.rotation.ndim
-        self.size = position.shape[-1]
-        assert self.ndim - 1 == self.position.ndim
-        assert self.ndim in {2, 3}
-        assert len(self.rotation) == len(self.position)
-
-    def transform(self, x) -> np.ndarray:
-        """
-        multiplies by rotation and adds position
-        Args:
-            x: coordinates must be in last dimension
-
-        Returns:
-            transformed coordinates. in dimensions (n_particles, n_points, 2)
-        """
-        rotated = x @ self.rotation.T
-        if self.ndim > 2:
-            rotated = rotated.T
-        if self.ndim > 2 and x.ndim > 1:
-            return rotated + np.expand_dims(self.position, axis=1)
-        else:
-            return rotated + self.position
-
-    def __repr__(self):
-        return f'position: {self.position.__repr__()}\nrotation: {self.rotation.__repr__()}'
-
-    def __matmul__(self, other):
-        rotation = self.rotation @ other.rotation
-        position = self.position + self.transform(other.position)
-        return Pose(rotation, position)
+    x[:3] = x_hat[:3, 3]
+    x[3] = x_hat[2, 1]
+    x[4] = x_hat[0, 2]
+    x[5] = x_hat[1, 0]
+    return x
 
 
 class Sensor(ABC):
-    def __getitem__(self, item):
+    def __getitem__(self, item: int) -> Tuple[np.ndarray, np.ndarray]:
         """
         Get the measurement associated with the timestamp
 
@@ -97,172 +47,50 @@ class Sensor(ABC):
             item: a timestamp
 
         Returns:
-            Sensor output
+            Time delta and sensor output
         """
         # noinspection PyUnresolvedReferences
-        data = self._data.get(item, None)
-        if data is None:
-            print(f'Missed key {item}')
-        return data
+        return self._time[item], self._data[:, item, ...]
 
 
-class Lidar(Sensor):
-    """
-    FOV: 190 (degree)
-    Start angle: -5 (degree)
-    End angle: 185 (degree)
-    Angular resolution: 0.666 (degree)
-    Max range: 80 (meter)
+class Imu(Sensor):
+    def __init__(self, linear_velocity: np.ndarray, angular_velocity: np.ndarray, time_steps: np.ndarray):
+        assert angular_velocity.shape == linear_velocity.shape
+        self._time = time_steps
+        self._data = np.concatenate([linear_velocity, angular_velocity], axis=0)
 
-    * LiDAR rays with value 0.0 represent infinite range observations.
-    """
+        self.pose = expm(np.zeros(6))
 
-    def __init__(self, data_file='data/sensor_data/lidar.csv', downsample=1):
-        self.time, scans = utils.read_data_from_csv(data_file)
-        self.time = self.time[::downsample]
-        scans = scans[::downsample]
+    def update(self, idx):
+        time_delta, twist_rate = self[idx]
 
-        self._max_range = 75.
-        self._min_range = 2.
 
-        body_xy_scans = self._pre_process(scans)
-        self._data = dict(zip(self.time, body_xy_scans))
+class Camera(Sensor):
+    def __init__(self, features: np.ndarray, time_steps: np.ndarray):
+        self._data = features
+        self._time = time_steps
 
-    def __len__(self):
-        return len(self._data)
+        self.pose = self._get_pose()
 
-    def _pre_process(self, scans) -> np.ndarray:
+    @staticmethod
+    def _get_pose():
         """
-        Pre-process the dataset into xy coordinates in the body frame
-
-        Lidar sensor (LMS511) extrinsic calibration parameter from vehicle
+        Stereo camera (based on left camera) extrinsic calibration parameter from vehicle
         RPY(roll/pitch/yaw = XYZ extrinsic, degree), R(rotation matrix), T(translation matrix)
-        RPY: 142.759 0.0584636 89.9254
-        R: 0.00130201 0.796097 0.605167 0.999999 -0.000419027 -0.00160026 -0.00102038 0.605169 -0.796097
-        T: 0.8349 -0.0126869 1.76416p
-
-        Returns:
-            n x d x 2 numpy array
+        RPY: -90.878 0.0132 -90.3899
+        R: -0.00680499 -0.0153215 0.99985 -0.999977 0.000334627 -0.00680066 -0.000230383 -0.999883 -0.0153234
+        T: 1.64239 0.247401 1.58411
         """
-        self._rpy = (142.759, 0.0584636, 89.9254)
-        self._rotation = np.array([[0.00130201, 0.796097, 0.605167],
-                                   [0.999999, -0.000419027, -0.00160026],
-                                   [-0.00102038, 0.605169, -0.796097]])
-        self._position = np.array([0.8349, -0.0126869, 1.76416])
-        pose = Pose(self._rotation, self._position)
-
-        angles = np.deg2rad(np.linspace(-5, 185, scans.shape[1]))
-        assert np.allclose(np.linspace(-5, 185, 286) / 180 * np.pi, angles), "angles are calculated wrong"
-
-        x_scale = np.cos(angles)
-        y_scale = np.sin(angles)
-
-        out_of_range_mask = np.logical_or(scans < self._min_range, scans > self._max_range)
-        scans[out_of_range_mask] = np.nan
-
-        x = scans * x_scale
-        y = scans * y_scale
-
-        xyz_scan_sensor = np.stack([x, y, np.zeros_like(x)], axis=2)
-        xyz_scan_body = pose.transform(xyz_scan_sensor)
-
-        assert np.allclose(self._rotation @ xyz_scan_sensor[0, 0] + self._position, xyz_scan_body[0, 0]), \
-            "Broadcasting did not work as expected"
-        return xyz_scan_body[..., :2]
+        rotation = np.array([[-0.00680499, -0.0153215, 0.99985],
+                             [-0.999977, 0.000334627, -0.00680066],
+                             [-0.000230383, -0.999883, -0.0153234]])
+        position = np.array([1.64239, 0.247401, 1.58411])
+        return Pose(rotation, position)
 
 
-class Gyro(Sensor):
-    def __init__(self, data_file='data/sensor_data/gyro.csv'):
-        self.time, omega_sensor = utils.read_data_from_csv(data_file)
-        yaw = omega_sensor[:, 2]
-        data = self._pre_process(yaw)
-        self.time = self.time[1:]
-        self._data = dict(zip(self.time, data))
-
-    def _pre_process(self, yaw) -> np.ndarray:
-        """
-        Pre-process measurements into the body frame
-
-        FOG (Fiber Optic Gyro) extrinsic calibration parameter from vehicle
-        RPY(roll/pitch/yaw = XYZ extrinsic, degree), R(rotation matrix), T(translation matrix, meter)
-        RPY: 0 0 0
-        R: 1 0 0 0 1 0 0 0 1
-        T: -0.335 -0.035 0.78
-
-        * The sensor measurements are stored as [timestamp, delta roll, delta pitch, delta yaw] in radians.
-
-        Returns:
-            time-delta and yaw. The first yaw sample is dropped because there is no corresponding time delta.
-        """
-        time_delta = np.diff(self.time)
-        assert np.all(time_delta > 0)
-        return np.stack((time_delta, yaw[1:]), axis=1)
-
-
-def _get_update(distance) -> np.ndarray:
-    """
-    Compute the x, y, and angular translation over each time step
-    Uses the Euler approximation (treats movements as linear, instead of as an arc)
-
-    
-    Args:
-        distance: distance traveled by each wheel in each time step
-
-    Returns:
-        translated distance of the center of the vehicle
-    """
-    # difference between right and left count in a time step
-    avg_distance = np.sum(distance, axis=1).squeeze()
-    return avg_distance / 2
-
-
-class Encoder(Sensor):
-    def __init__(self, data_file='data/sensor_data/encoder.csv'):
-        self.time, counts = utils.read_data_from_csv(data_file)
-        deltas = self._pre_process(counts)
-        self._data = dict(zip(self.time, deltas))
-
-    def _pre_process(self, counts) -> np.ndarray:
-        """
-        Encoder calibrated parameter
-        Encoder resolution: 4096
-        Encoder left wheel diameter: 0.623479
-        Encoder right wheel diameter: 0.622806
-        Encoder wheel base: 1.52439
-
-        * The encoder data is stored as [timestamp, left count, right count].
-
-        Returns:
-            [dt, dx, dy, dtheta]
-        """
-        self._resolution = 4096
-        self._diameter = (0.623479, 0.623479)
-        self._wheel_base = 1.52439
-
-        # calibration constants, (m/count)
-        cal = np.pi * np.array(self._diameter) / self._resolution
-
-        counts_delta = np.diff(counts, axis=0)
-        time_delta = np.diff(self.time)
-        assert counts_delta.shape == (len(counts) - 1, 2)
-        assert len(counts_delta) == len(time_delta)
-
-        v = _get_update(counts_delta * cal) / time_delta
-        return v
-
-
-class Car:
-    def __init__(self, n_particles, v_var, omega_var, resample_threshold):
-        self.resample_threshold = resample_threshold * n_particles
-        self.v_var = v_var
-        self.omega_var = omega_var
-        self.n_particles = n_particles
-
-        n_dims = 2
-        self.yaw = np.zeros(n_particles)
-        self.position = np.zeros((n_particles, n_dims))
+class Vehicle:
+    def __init__(self):
         self.weights = self.uniform_prior()
-
         self.velocity = 0.
 
     def re_init(self):
@@ -331,84 +159,6 @@ class Car:
         if self.n_eff < self.resample_threshold:
             self.resample()
 
-    @property
-    def n_eff(self) -> float:
-        """
-        Number of effective samples
-
-        Returns:
-            A value in the range [0, n_samples]
-        """
-        return 1 / np.sum(self.weights ** 2)
-
-    @property
-    def ml_pose(self) -> Pose:
-        """
-        Pose object for the particle with the largest weight
-
-        Returns:
-            a Pose object
-        """
-        idx = np.argmax(self.weights)
-        return Pose(self.yaw[idx], self.position[idx])
-
-    @property
-    def pose(self) -> Pose:
-        """
-        Pose object for the particle with the largest weight
-
-        Returns:
-            # a Pose object
-        """
-        return Pose(self.yaw, self.position)
-
-
-@numba.njit(parallel=True, fastmath=True)
-def _negative_update(scan_cells, origin_cell, map_, decrement, lambda_min) -> None:
-    """
-    Decrement the likelihood of cells where no object was detected
-
-    Args:
-        scan_cells: Indices of cells where an object was detected
-        origin_cell: The origin of the trace rays (the vehicle location)
-        map_: A 2d numpy array containing cell log-likelihoods
-        decrement: How much to decrement each cell encountered during Bresenham trace
-        lambda_min: Clip log-likelihood below this value
-    """
-    # 0.002024s per iteration (241s total) without JIT (and without the inner for loop)
-    # 0.001472s per iteration (172s total) with JIT
-    # 0.000646s per iteration (81s total) parallelized with JIT (four cores)
-    sx, sy = origin_cell
-    for i in numba.prange(len(scan_cells)):
-        ex, ey = scan_cells[i]
-        trace = utils.bresenham2D(sx, sy, ex, ey)
-        # use a loop for numba compatibility
-        for tx, ty in trace[:-1]:  # the last element of trace is (ex, ey)
-            map_[tx, ty] -= decrement
-            # clip minimum
-            if map_[tx, ty] < lambda_min:
-                map_[tx, ty] = lambda_min
-
-
-@numba.njit(parallel=True, fastmath=True)
-def _positive_update(scan_cells, map_, increment, lambda_max) -> None:
-    """
-    Increment the likelihood of cells where we detected an object
-    map_[scan_cells[:, 0], scan_cells[:, 1]] += increment
-
-    Args:
-        scan_cells: Indices of cells where an object was detected
-        map_: The map to be updated according to scan_cells
-        increment: How much to increment each cell by
-        lambda_max: The clipping limit
-    """
-    for i in numba.prange(len(scan_cells)):
-        x, y = scan_cells[i]
-        map_[x, y] += increment
-        # clip upper limit
-        if map_[x, y] > lambda_max:
-            map_[x, y] = lambda_max
-
 
 @numba.njit()
 def coord_to_cell(point: np.ndarray, minima: np.ndarray, resolution: float) -> np.ndarray:
@@ -454,90 +204,8 @@ def get_coords(disparity) -> np.ndarray:
     return np.stack([x, y, z], axis=2)
 
 
-class Camera(Sensor):
-    def __init__(self, root='data/stereo_images'):
-        self._root = root
-        self._left_dir = 'stereo_left'
-        self._right_dir = 'stereo_right'
-
-        self.pose = self._get_pose()
-
-        window_size = 3
-        min_disp = 16
-        num_disp = 112 - min_disp
-        self._stereo = cv2.StereoSGBM_create(
-            minDisparity=min_disp,
-            numDisparities=num_disp,
-            blockSize=51,
-            P1=8 * 3 * window_size ** 2,
-            P2=32 * 3 * window_size ** 2,
-            disp12MaxDiff=1,
-            uniquenessRatio=10,
-            speckleWindowSize=100,
-            speckleRange=32
-        )
-
-        self.time = self.get_timestamps()
-
-    def __getitem__(self, item):
-        stereo_set = self.load_images(
-            [os.path.join(self._root, self._left_dir, f'{item}.png'),
-             os.path.join(self._root, self._right_dir, f'{item}.png')])
-        if any(im is None for im in stereo_set):
-            print(f"No matching image for {item}.png")
-            return
-        img = stereo_set[0]
-        disparity = self._stereo.compute(*stereo_set).astype(np.float32) / 16.0
-        valid = disparity > disparity.min()
-
-        camera_coords = get_coords(disparity)
-
-        pixels = img[valid]
-        camera_coords = camera_coords[valid]
-        assert pixels.shape[0] == camera_coords.shape[0]
-
-        coords = self.pose.transform(camera_coords)
-        return coords, pixels
-
-    def get_timestamps(self):
-        filenames = os.listdir(os.path.join(self._root, self._left_dir))
-        timestamps = [int(fn[:-4]) for fn in filenames]
-        return timestamps
-
-    @staticmethod
-    def load_images(paths: List[str]):
-        return [cv2.imread(p, 0) for p in paths]
-
-    @staticmethod
-    def _get_pose():
-        """
-        Stereo camera (based on left camera) extrinsic calibration parameter from vehicle
-        RPY(roll/pitch/yaw = XYZ extrinsic, degree), R(rotation matrix), T(translation matrix)
-        RPY: -90.878 0.0132 -90.3899
-        R: -0.00680499 -0.0153215 0.99985 -0.999977 0.000334627 -0.00680066 -0.000230383 -0.999883 -0.0153234
-        T: 1.64239 0.247401 1.58411
-        """
-        rotation = np.array([[-0.00680499, -0.0153215, 0.99985],
-                             [-0.999977, 0.000334627, -0.00680066],
-                             [-0.000230383, -0.999883, -0.0153234]])
-        position = np.array([1.64239, 0.247401, 1.58411])
-        return Pose(rotation, position)
-
-
 class Map:
-    def __init__(self, resolution=0.1, x_range=(-50, 50), y_range=(-50, 50), lambda_max_factor=100, increment=16,
-                 decrement=4):
-        resolution = float(resolution)
-        self.resolution = resolution
-        self._range = np.array([x_range, y_range])
-
-        self._increment = np.log(increment)
-        self._decrement = np.log(decrement)
-        self._lambda_max = self._increment * lambda_max_factor
-        self._lambda_min = -self._decrement * lambda_max_factor
-        self._shape = np.array([int(np.ceil(np.diff(x_range) / resolution + 1)),
-                                int(np.ceil(np.diff(y_range)) / resolution + 1)])
-
+    def __init__(self):
         self._map = np.zeros(self._shape, dtype=np.float)
         self.texture = np.zeros(shape=self._shape, dtype=np.uint8) + 127
 
@@ -566,7 +234,7 @@ class Map:
     @property
     def likelihood(self):
         return np.exp(self._map) / (1 + np.exp(self._map))
-    
+
     def color(self, cells, pixels):
         self.texture[cells[:, 0], cells[:, 1]] = pixels
 
@@ -610,69 +278,9 @@ class Map:
             None
         """
         self.update_count += 1
-        origin_cell = coord_to_cell(origin, self.minima, self.resolution)
-        assert self.is_in_map(origin_cell), f"origin is outside the map {origin}"
-        valid_scan_cells = self.get_valid_scan_cells(scan)
-
-        _positive_update(valid_scan_cells, self._map, self._increment, self._lambda_max)
-        _negative_update(valid_scan_cells, origin_cell, self._map, self._decrement, self._lambda_min)
 
     def coord_to_cell(self, position):
         return coord_to_cell(position, self.minima, self.resolution)
-
-    def get_valid_scan_cells(self, scan):
-        scan_cells = coord_to_cell(scan, self.minima, self.resolution)
-        scan_valid = self.valid_scan(scan_cells)
-        valid_scan_cells = scan_cells[scan_valid]
-        return valid_scan_cells
-
-    def valid_scan(self, cells):
-        """
-        Tests each point of the scan for validity.
-        Invalid if a dimension is less than two cells or greater than the dimensions of the map.
-
-        Args:
-            cells: numpy array of cell coordinates
-
-        Returns:
-            Valid cells are set to True. Drops the last (x,y) dimension of cells
-        """
-        gt_one_cell = cells > 1
-        lt_map_size = cells < self._shape
-        valid = np.logical_and.reduce(
-            [gt_one_cell[..., 0], gt_one_cell[..., 1], lt_map_size[..., 0], lt_map_size[..., 1]])
-        assert valid.shape == cells.shape[:-1]
-        return valid
-
-    def is_in_map(self, origin_cell: np.ndarray) -> bool:
-        """
-        Test if a cell is in the map
-        Args:
-            origin_cell: one or more cell coordinates
-
-        Returns:
-            True if the cell is in the map
-        """
-        return np.all(origin_cell > 0) and np.all(origin_cell < self._shape)
-
-    def correlation(self, scan) -> np.ndarray:
-        """
-        Compute the correlation
-        Args:
-            scan: shape (n_particles, n_scans, 2)
-
-        Returns:
-            shape (n_particles)
-        """
-        ml_map = self.ml_map
-        corr = np.zeros(len(scan))
-        for i, particle_scan in enumerate(scan):
-            valid_scan_cells = self.get_valid_scan_cells(particle_scan)
-            selected_map_cells = ml_map[valid_scan_cells[..., 0], valid_scan_cells[..., 1]]
-            corr[i] = np.sum(selected_map_cells)
-        assert len(corr) == len(scan)
-        assert corr.ndim == 1
-        return corr
 
 
 class Runner:
@@ -680,19 +288,16 @@ class Runner:
     A runner class that processes sensor inputs and appropriately updates the car and map objects.
     """
 
-    def __init__(self, camera: Camera, encoder: Encoder, gyro: Gyro, lidar: Lidar, car: Car, map_: Map, downsample: int = 1,
-                 plot_interval=0, plot_type='occupancy'):
+    def __init__(self, camera: Camera, imu: Imu, vehicle: Vehicle, map_: Map,
+                 downsample: int = 1, plot_interval=0):
         """
         Args:
             camera: Camera object
-            encoder: Encoder object
-            gyro: Gyro object
-            lidar: Lidar object
-            car: Car object
+            imu: Gyro object
+            vehicle: Car object
             map_: Map object
             downsample: Factor by which to downsample. default=1, i.e. no down-sampling
             plot_interval: Interval at which to update the map plot
-            plot_type: one of ('occupancy', 'texture')
         """
 
         assert isinstance(downsample, int)
@@ -700,38 +305,32 @@ class Runner:
         self.downsample = downsample
 
         self.camera = camera
-        self.encoder = encoder
-        self.gyro = gyro
-        self.lidar = lidar
-        self.car = car
+        self.imu = imu
         self.map = map_
+
+        # plotting
         self._figure = None
         self._ax = None
         self._animation = None
         self._fig_handle = None
 
         self._plot_number = 0
-        plotter = {'occupancy': self.plot_occupancy,
-                   'texture': self.plot_texture}
-        self.plot = plotter[plot_type]
-
-        self.execution_seq = self.get_execution_sequence()
-
-    def __len__(self):
-        return len(self.execution_seq)
+        self.plot = self.plot_occupancy
 
     def run(self):
-        self.car.re_init()
         print("Run starting")
         report_iterations = int(1e5)
 
         start = time.time()
-        for i, (timestamp, executor) in enumerate(self.execution_seq):
-            executor(timestamp)
+        for i in itertools.count():
+            self._step(i)
             if (i + 1) % report_iterations == 0:
                 print(f'Sample {(i + 1) // 1000} thousand in {time.time() - start: 02f}s')
                 start = time.time()
         self.plot()
+
+    def _step(self, idx):
+        self.imu.update(idx)
 
     def plot_continuous(self):
         map_ = self.get_map_with_particles()
@@ -756,120 +355,22 @@ class Runner:
         plt.savefig(f'results/map{self._plot_number}.png')
         plt.show()
 
-    def plot_texture(self):
-        self._plot_number += 1
-        map_ = self.map.texture
-        map_ = map_.T
-
-        plt.imshow(map_, origin='lower', extent=[*self.map.x_range, *self.map.y_range], cmap='gray')
-        plt.title("Texture")
-        plt.xlabel("x distance from start (m)")
-        plt.ylabel("y distance from start (m)")
-        plt.savefig(f'results/texture{self._plot_number:02d}.png')
-        plt.show()
-
     def get_map_with_particles(self):
         max_value = 255
         red = np.array([max_value, 0, 0])
         map_ = (self.map.ml_map_for_plot * max_value).astype(np.int)
         map_ = np.stack([map_] * 3, axis=2)
-        particles = self.map.coord_to_cell(self.car.position)
+        particles = self.map.coord_to_cell(self.vehicle.position)
         map_[particles[:, 0], particles[:, 1], :] = red
         return np.transpose(map_, (1, 0, 2))
 
-    def get_execution_sequence(self) -> np.ndarray:
-        """
-        Create a numpy array consisting of (timestamp, executor) pairs, sorted by timestamp.
-        """
-        camera_time = self.camera.time
-        gyro_time = self.gyro.time
-        encoder_time = self.encoder.time
-        lidar_time = self.lidar.time
+    def step_camera(self, idx):
+        time_delta, body_coords = self.camera[idx]
 
-        if self.downsample > 1:
-            gyro_time = gyro_time[0::self.downsample]
-            lidar_time = gyro_time[0::self.downsample]
-            encoder_time = encoder_time[0::self.downsample]
-
-        timestamps = np.concatenate([camera_time, encoder_time, gyro_time, lidar_time], axis=0)
-        assert timestamps.ndim == 1
-        executors = np.concatenate(([self.step_camera] * len(camera_time),
-                                    [self.step_encoder] * len(encoder_time),
-                                    [self.step_gyro] * len(gyro_time),
-                                    [self.step_lidar] * len(lidar_time)), axis=0)
-        execution_sequence = np.stack((timestamps, executors), axis=1)
-        execution_sequence = execution_sequence[execution_sequence[:, 0].argsort()]
-        assert np.all(execution_sequence[1:, 0] >= execution_sequence[:-1, 0])
-        assert execution_sequence.shape == (len(timestamps), 2)
-        return execution_sequence
-
-    def step_camera(self, timestamp):
-        z_min = 0.
-        z_max = 2.
-        # try:
-        data = self.camera[timestamp]
-        if data is None:
-            return
-        body_coords, pixels = data
-
-        valid = np.logical_and(body_coords[..., 2] > z_min, body_coords[..., 2] < z_max)
-        body_coords = body_coords[valid, :-1]  # filter and drop the z-dimension
-        pixels = pixels[valid]
-
-        pose = self.car.ml_pose
+        pose = self.imu.pose
         world_coords = pose.transform(body_coords)
-        cells = self.map.coord_to_cell(world_coords)
+        # todo: update map...
 
-        averaged_pixels, unique_cells = self.average_colors_in_each_cell(cells, pixels)
-
-        self.map.color(unique_cells, averaged_pixels)
-        # except Exception as e:
-        #     print(e)
-
-    @staticmethod
-    def average_colors_in_each_cell(cells, pixels):
-        unique_cells, inverse = np.unique(cells, return_inverse=True, axis=0)
-        averaged_pixels = np.zeros(len(unique_cells), dtype=np.uint8)
-        for index in range(len(unique_cells)):
-            averaged_pixels[index] = pixels[inverse == index].mean().astype(np.uint8)
-        return averaged_pixels, unique_cells
-
-    def step_gyro(self, timestamp):
-        data = self.gyro[timestamp]
-        if data is not None:
-            time_step, yaw = data
-            self.car.predict(yaw, time_step)
-
-    def step_encoder(self, timestamp):
-        """
-        Only use the velocity data from the encoder.
-        Do no state updates other than the car velocity.
-
-        Args:
-            timestamp: the encoder timestamp
-        """
-        v = self.encoder[timestamp]
-        if v is not None:
-            self.car.velocity = v
-
-    def step_lidar(self, timestamp):
-        scan_body = self.lidar[timestamp]
-        if scan_body is None:
-            return
-
-        if self.map.update_count > 0:  # ensure there is a map
-            correlation = self._get_correlation(scan_body)
-            self.car.update(softmax(correlation))
-
-        # Update map according to the maximum likelihood pose of the car
-        car_pose = self.car.ml_pose
-        scan_world = car_pose.transform(scan_body)
-        self.map.update(scan=scan_world[:, :2], origin=car_pose.position)
-
-        if (self.map.update_count + 1) % self.plot_interval == 0:
-            self.plot()
-
-    def _get_correlation(self, scan_body) -> np.ndarray:
-        scan_world = self.car.transform_all(scan_body)
-        assert scan_world.shape == (self.car.n_particles, *scan_body.shape)
-        return self.map.correlation(scan_world)
+    def step_gyro(self, idx):
+        time_step, x = self.imu[idx]
+        # todo: update position

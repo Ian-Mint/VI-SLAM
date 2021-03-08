@@ -1,20 +1,33 @@
 import time
 
+import numpy as np
+
 from sensors import *
 
 
 if __name__ == '__main__':
+
+    with np.load('data/features.npz') as data:
+        k = data['K']
+        b = data['b']
+        features = data.get('features', None)  # for when we make our own features
+        linear_velocity = data['linear_velocity']
+        angular_velocity = data['angular_velocity']
+        imu_T_cam = data['imu_T_cam']
+        timestamps = data['time_stamps']
+
+    time_steps = np.diff(timestamps)
+    linear_velocity = linear_velocity[:, :-1]
+    angular_velocity = angular_velocity[:, :-1]
+    features = features[:, :-1]
+
     runner = Runner(
-        Camera(),
-        Encoder(),
-        Gyro(),
-        Lidar(downsample=1),
-        Car(n_particles=20, v_var=1e-9, omega_var=1e-11, resample_threshold=0.8),  # variance in m/nanosecond
-        Map(resolution=1., x_range=(-100, 1400), y_range=(-1200, 100), lambda_max_factor=100, increment=16,
-            decrement=4),
+        Camera(features, time_steps),
+        Imu(linear_velocity, angular_velocity, time_steps),
+        Vehicle(),
+        Map(),
         downsample=1,
         plot_interval=5000,
-        plot_type='texture',
     )
     start = time.time()
     runner.run()
