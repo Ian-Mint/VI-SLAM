@@ -14,16 +14,47 @@ np.seterr(divide='raise', invalid='ignore')  # raise an error on divide by zero
 
 
 @numba.njit()
+def _hat_map(x, out):
+    """
+    The 3x3 hat map
+
+    Args:
+        x: 3-vector
+        out: 3x3 array
+
+    Returns:
+        3x3 x^
+    """
+    out[0, 1] = -x[2]
+    out[0, 2] = x[1]
+    out[1, 0] = x[2]
+    out[1, 2] = -x[0]
+    out[2, 0] = -x[1]
+    out[2, 1] = x[0]
+
+
+@numba.njit()
+def _vee_map(x, out):
+    """
+    The 3x3 vee map
+    Args:
+        out: 3-vector
+        x: 3x3 array
+
+    Returns:
+        Inverse of the 3x3 hat map
+    """
+    out[0] = x[2, 1]
+    out[1] = x[0, 2]
+    out[2] = x[1, 0]
+
+
+@numba.njit()
 def hat(x):
     x_hat = np.zeros((4, 4))
 
     x_hat[:3, -1] = x[:3]
-    x_hat[0, 1] = -x[5]
-    x_hat[0, 2] = x[4]
-    x_hat[1, 0] = x[5]
-    x_hat[1, 2] = -x[3]
-    x_hat[2, 0] = -x[4]
-    x_hat[2, 1] = x[3]
+    _hat_map(x[3:], x_hat)
     return x_hat
 
 
@@ -32,10 +63,18 @@ def vee(x_hat):
     x = np.zeros(6)
 
     x[:3] = x_hat[:3, 3]
-    x[3] = x_hat[2, 1]
-    x[4] = x_hat[0, 2]
-    x[5] = x_hat[1, 0]
+    _vee_map(x_hat, x[3:])
     return x
+
+
+@numba.njit()
+def adj_hat(x):
+    x_hat = np.zeros((6, 6))
+
+    _hat_map(x[3:], x_hat)
+    _hat_map(x[3:], x_hat[3:, 3:])
+    _hat_map(x[:3], x_hat[:3, 3:])
+    return x_hat
 
 
 class Sensor(ABC):
@@ -59,10 +98,12 @@ class Imu(Sensor):
         self._time = time_steps
         self._data = np.concatenate([linear_velocity, angular_velocity], axis=0)
 
-        self.pose = expm(np.zeros(6))
+        self.pose = expm(np.zeros((4, 4)))
 
     def update(self, idx):
         time_delta, twist_rate = self[idx]
+        self.pose = self.pose @ expm(time_delta * twist_rate)  # todo: consider preprocessing the second term
+        cv
 
 
 class Camera(Sensor):
