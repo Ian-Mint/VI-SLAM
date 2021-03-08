@@ -1,5 +1,36 @@
 import numba
 import numpy as np
+import scipy.linalg
+
+
+expm = scipy.linalg.expm
+
+
+def homogeneous(x: np.ndarray) -> np.ndarray:
+    """
+    Convert to homogeneous coordinates along the first dimension
+    
+    Args:
+        x: numpy array 
+
+    Returns:
+        x_
+    """
+    out = np.ones(shape=(x.shape[0] + 1, *x.shape[1:]), dtype=x.dtype)
+    out[:-1] = x[...]
+    return out
+
+
+@numba.njit()
+def inv_pose(x: np.ndarray):
+    out = np.zeros_like(x)
+    r = x[:3, :3]
+    p = x[:3, 3]
+
+    out[3, 3] = 1.
+    out[:3, :3] = r.T
+    out[:3, 3] = -r.T @ p
+    return out
 
 
 @numba.njit()

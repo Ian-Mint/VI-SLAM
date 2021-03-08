@@ -5,12 +5,10 @@ from typing import Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
-from scipy.linalg import expm
 
-from functions import hat
+from functions import hat, homogeneous, expm
 
 __all__ = ['Camera', 'Imu', 'Map', 'Vehicle', 'Runner']
-
 
 np.seterr(divide='raise', invalid='ignore')  # raise an error on divide by zero
 
@@ -65,7 +63,6 @@ class Camera(Sensor):
         self._time = time_steps
 
     def _pre_process(self, features):
-
         return features
 
 
@@ -118,12 +115,10 @@ class Vehicle:
             self.resample()
 
 
-# @numba.njit()
-
-
 class Map:
     def __init__(self, n_points: int):
         self.points = np.zeros((3, n_points))
+        self.cv = np.zeros((3, n_points, n_points))
 
 
 class Runner:
@@ -176,7 +171,24 @@ class Runner:
         self.plot()
 
     def _step(self, idx):
+        self._imu_update(idx)
+        self._map_update()
+
+    def _imu_update(self, idx):
         self.imu.update(idx)
+
+    def _map_update(self, indices: np.ndarray, observations: np.ndarray):
+        """
+        Use EKF to update the map points
+
+        Args:
+            indices: i corresponding self.points[:, i]
+            observations: z_i
+        """
+        # todo: 1. indices of valid obs as array, 2. list of arrays containing valid obs, 3. Convert valid obs to xyz
+        #  in camera frame
+        # todo: convert from naive update to EKF
+        self.map.points[:, indices] = np.linalg.inv(self.imu.pose) @ homogeneous(observations)
 
     def plot(self):
         plt.scatter(self.imu.trail[0], self.imu.trail[1], s=1)
