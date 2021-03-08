@@ -77,7 +77,11 @@ def adj_hat(x):
     return x_hat
 
 
+# noinspection PyUnresolvedReferences
 class Sensor(ABC):
+    def __len__(self):
+        return len(self._time)
+
     def __getitem__(self, item: int) -> Tuple[np.ndarray, np.ndarray]:
         """
         Get the measurement associated with the timestamp
@@ -88,22 +92,33 @@ class Sensor(ABC):
         Returns:
             Time delta and sensor output
         """
-        # noinspection PyUnresolvedReferences
+        if item >= self.__len__():
+            raise StopIteration
         return self._time[item], self._data[:, item, ...]
 
 
 class Imu(Sensor):
     def __init__(self, linear_velocity: np.ndarray, angular_velocity: np.ndarray, time_steps: np.ndarray):
         assert angular_velocity.shape == linear_velocity.shape
-        self._time = time_steps
+        self._time = np.squeeze(time_steps)
         self._data = np.concatenate([linear_velocity, angular_velocity], axis=0)
 
         self.pose = expm(np.zeros((4, 4)))
+        self.cv = np.eye(6)  # todo: initialize covariance
+
+        self.trail = np.zeros((2, len(self._time)))
 
     def update(self, idx):
         time_delta, twist_rate = self[idx]
-        self.pose = self.pose @ expm(time_delta * twist_rate)  # todo: consider preprocessing the second term
-        cv
+        self.pose = self.pose @ expm(time_delta * hat(twist_rate))  # todo: consider preprocessing the second term
+        # s = expm(-time * adj_hat(twist_rate))
+        # self.cv = s @ self.cv @ s.T + noise
+
+        self.trail[:, idx] = self.xy_coords
+
+    @property
+    def xy_coords(self):
+        return self.pose[:2, 3]
 
 
 class Camera(Sensor):
@@ -111,50 +126,10 @@ class Camera(Sensor):
         self._data = features
         self._time = time_steps
 
-        self.pose = self._get_pose()
-
-    @staticmethod
-    def _get_pose():
-        """
-        Stereo camera (based on left camera) extrinsic calibration parameter from vehicle
-        RPY(roll/pitch/yaw = XYZ extrinsic, degree), R(rotation matrix), T(translation matrix)
-        RPY: -90.878 0.0132 -90.3899
-        R: -0.00680499 -0.0153215 0.99985 -0.999977 0.000334627 -0.00680066 -0.000230383 -0.999883 -0.0153234
-        T: 1.64239 0.247401 1.58411
-        """
-        rotation = np.array([[-0.00680499, -0.0153215, 0.99985],
-                             [-0.999977, 0.000334627, -0.00680066],
-                             [-0.000230383, -0.999883, -0.0153234]])
-        position = np.array([1.64239, 0.247401, 1.58411])
-        return Pose(rotation, position)
-
 
 class Vehicle:
     def __init__(self):
-        self.weights = self.uniform_prior()
-        self.velocity = 0.
-
-    def re_init(self):
-        self.yaw = np.zeros_like(self.yaw)
-        self.position = np.zeros_like(self.position)
-        self.weights = self.uniform_prior()
-
-        self.velocity = 0.
-
-    def uniform_prior(self):
-        n_particles = self.n_particles
-        return np.ones((n_particles,)) / n_particles
-
-    def __len__(self):
-        return self.n_particles
-
-    def resample(self):
-        particle_indices = np.arange(0, self.n_particles)
-        resampled_indices = np.random.choice(particle_indices, size=self.n_particles, replace=True, p=self.weights)
-
-        self.yaw[:] = self.yaw[resampled_indices]
-        self.position[:] = self.position[resampled_indices]
-        self.weights = self.uniform_prior()
+        pass
 
     def predict(self, yaw: float, time_step: int):
         v_noise = np.random.normal(loc=0, scale=self.v_var, size=len(self))
@@ -247,81 +222,7 @@ def get_coords(disparity) -> np.ndarray:
 
 class Map:
     def __init__(self):
-        self._map = np.zeros(self._shape, dtype=np.float)
-        self.texture = np.zeros(shape=self._shape, dtype=np.uint8) + 127
-
-        self.update_count = 0
-
-    @property
-    def minima(self):
-        """x_min, y_min"""
-        return self._range[:, 0]
-
-    @property
-    def maxima(self):
-        """x_max, y_max"""
-        return self._range[:, 1]
-
-    @property
-    def x_range(self):
-        """x_min, x_max"""
-        return self._range[0, :]
-
-    @property
-    def y_range(self):
-        """y_min, y_max"""
-        return self._range[1, :]
-
-    @property
-    def likelihood(self):
-        return np.exp(self._map) / (1 + np.exp(self._map))
-
-    def color(self, cells, pixels):
-        self.texture[cells[:, 0], cells[:, 1]] = pixels
-
-    def show_likelihood(self, title):
-        plt.imshow(self.likelihood, cmap='gray')
-        plt.title(title)
-        plt.show()
-
-    def show_map(self, title):
-        img = self.ml_map_for_plot
-        plt.imshow(img, cmap='gray')
-        plt.title(title)
-        plt.show()
-
-    @property
-    def ml_map_for_plot(self):
-        ml_map = np.ones_like(self._map)
-        ml_map[self._map == 0] = 0.5
-        ml_map[self._map > 0] = 0
-        return ml_map
-
-    @property
-    def ml_map(self):
-        ml_map = np.zeros_like(self._map, dtype=bool)
-        ml_map[self._map > 0] = True
-        return ml_map
-
-    @property
-    def shape(self):
-        return tuple(self._shape)
-
-    def update(self, scan: np.ndarray, origin: Union[List, Tuple, np.ndarray]) -> None:
-        """
-        Update the map according to the results of a lidar scan
-
-        Args:
-            scan: a set of scan points in the world frame
-            origin: Origin of the scan. i.e., the ML location of the car
-
-        Returns:
-            None
-        """
-        self.update_count += 1
-
-    def coord_to_cell(self, position):
-        return coord_to_cell(position, self.minima, self.resolution)
+        pass
 
 
 class Runner:
@@ -356,54 +257,33 @@ class Runner:
         self._fig_handle = None
 
         self._plot_number = 0
-        self.plot = self.plot_occupancy
+        self.plot = self.plot
 
     def run(self):
         print("Run starting")
         report_iterations = int(1e5)
 
         start = time.time()
-        for i in itertools.count():
-            self._step(i)
-            if (i + 1) % report_iterations == 0:
-                print(f'Sample {(i + 1) // 1000} thousand in {time.time() - start: 02f}s')
-                start = time.time()
+        try:
+            for i in itertools.count():
+                self._step(i)
+                if (i + 1) % report_iterations == 0:
+                    print(f'Sample {(i + 1) // 1000} thousand in {time.time() - start: 02f}s')
+                    start = time.time()
+        except StopIteration:
+            pass
         self.plot()
 
     def _step(self, idx):
         self.imu.update(idx)
 
-    def plot_continuous(self):
-        map_ = self.get_map_with_particles()
-
-        if self._figure is None:
-            self._figure = plt.figure()
-            self._ax = self._figure.gca()
-            self._fig_handle = self._ax.imshow(map_)
-            self._figure.show()
-        else:
-            self._fig_handle.set_data(map_)
-        self._figure.canvas.draw()
-
-    def plot_occupancy(self):
-        self._plot_number += 1
-        map_ = self.get_map_with_particles()
-
-        plt.imshow(map_, origin='lower', extent=[*self.map.x_range, *self.map.y_range])
+    def plot(self):
+        plt.scatter(self.imu.trail[0], self.imu.trail[1], s=1)
         plt.title("Map")
         plt.xlabel("x distance from start (m)")
         plt.ylabel("y distance from start (m)")
         plt.savefig(f'results/map{self._plot_number}.png')
         plt.show()
-
-    def get_map_with_particles(self):
-        max_value = 255
-        red = np.array([max_value, 0, 0])
-        map_ = (self.map.ml_map_for_plot * max_value).astype(np.int)
-        map_ = np.stack([map_] * 3, axis=2)
-        particles = self.map.coord_to_cell(self.vehicle.position)
-        map_[particles[:, 0], particles[:, 1], :] = red
-        return np.transpose(map_, (1, 0, 2))
 
     def step_camera(self, idx):
         time_delta, body_coords = self.camera[idx]

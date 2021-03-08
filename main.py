@@ -32,4 +32,3 @@ if __name__ == '__main__':
     start = time.time()
     runner.run()
     print(f'complete in {time.time() - start:02f} seconds')
-    runner.plot()
