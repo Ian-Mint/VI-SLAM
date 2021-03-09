@@ -7,7 +7,7 @@ import numpy as np
 
 from functions import hat, homogeneous, expm, img_to_camera_frame
 
-__all__ = ['Camera', 'Imu', 'Map', 'Vehicle', 'Runner']
+__all__ = ['Camera', 'Imu', 'Map', 'Runner']
 
 np.seterr(divide='raise', invalid='ignore')  # raise an error on divide by zero
 
@@ -106,55 +106,6 @@ class Camera:
         return self._time[item], self._data[item]
 
 
-class Vehicle:
-    def __init__(self):
-        pass
-
-    def predict(self, yaw: float, time_step: int):
-        v_noise = np.random.normal(loc=0, scale=self.v_var, size=len(self))
-        omega_noise = np.random.normal(loc=0, scale=self.omega_var, size=len(self))
-
-        translation = time_step * (self.velocity + v_noise)
-        dtheta = yaw + time_step * omega_noise
-        self.yaw += dtheta
-
-        dx = translation * np.cos(self.yaw)
-        dy = translation * np.sin(self.yaw)
-
-        self.position[:, 0] += dx
-        self.position[:, 1] += dy
-
-    def transform_ml(self, x):
-        """
-        Transform x into the world frame, using the pose of the maximum likelihood particle
-
-        Args:
-            x: a set of coordinates (samples, 3)
-
-        Returns:
-            x transformed into the world frame
-        """
-        return self.ml_pose.transform(x)
-
-    def transform_all(self, x):
-        """
-        Transform x into the world frame, broadcasting into all particles.
-
-        Args:
-            x: a set of coordinates (samples, 3)
-
-        Returns:
-            x transformed into the world frame
-        """
-        return self.pose.transform(x)
-
-    def update(self, new_weights: np.ndarray):
-        self.weights[:] *= new_weights
-        self.weights[:] /= np.sum(self.weights)
-        if self.n_eff < self.resample_threshold:
-            self.resample()
-
-
 class Map:
     def __init__(self, n_points: int):
         self.points = np.zeros((3, n_points))
@@ -166,33 +117,22 @@ class Runner:
     A runner class that processes sensor inputs and appropriately updates the car and map objects.
     """
 
-    def __init__(self, camera: Camera, imu: Imu, vehicle: Vehicle, map_: Map, n_samples: int, downsample: int = 1,
-                 plot_interval=0):
+    def __init__(self, camera: Camera, imu: Imu, map_: Map, n_samples: int, plot_interval=1):
         """
         Args:
             n_samples: number of time steps
             camera: Camera object
             imu: Gyro object
-            vehicle: Car object
             map_: Map object
-            downsample: Factor by which to downsample. default=1, i.e. no down-sampling
             plot_interval: Interval at which to update the map plot
         """
 
-        assert isinstance(downsample, int)
         self.plot_interval = plot_interval
-        self.downsample = downsample
         self.n_samples = n_samples
 
         self.camera = camera
         self.imu = imu
         self.map = map_
-
-        # plotting
-        self._figure = None
-        self._ax = None
-        self._animation = None
-        self._fig_handle = None
 
         self._plot_number = 0
         self.plot = self.plot
