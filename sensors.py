@@ -62,10 +62,10 @@ class Camera:
 
         self.M = self._get_stereo_calibration(calibration, base)
 
-        n_points = len(self._time)
         prior_covariance = 1
         prior_variance = 2
-        _measurement_cv = np.zeros((3, 3)) + prior_covariance + np.diag([prior_variance] * 3)
+        dim = 4
+        _measurement_cv = np.zeros((dim, dim)) + prior_covariance + np.diag([prior_variance] * dim)
         self.noise = scipy.stats.multivariate_normal(cov=_measurement_cv)
 
     def img_to_camera_frame(self, observation):
@@ -120,6 +120,7 @@ class Map:
         prior_variance = 0.25
         self.cv = np.zeros((3, 3, n_points)) + prior_covariance + np.diag([prior_variance] * 3)[..., None]
         self.points = np.zeros((3, n_points))
+        self.points[:] = np.nan
 
 
 class Runner:
@@ -132,7 +133,7 @@ class Runner:
         Args:
             n_samples: number of time steps
             camera: Camera object
-            imu: Gyro object
+            imu: Imu object
             map_: Map object
             plot_interval: Interval at which to update the map plot
         """
@@ -175,18 +176,30 @@ class Runner:
         noise = self.camera.noise.rvs(len(indices)).T
         cv = self.map.cv[..., indices]
         mu = self.map.points[:, indices]
-        m = self.camera.M
 
-        cam_t_map = self.camera.pose @ inv_pose(self.imu.pose)
-        mu_camera_ = homo_mul(cam_t_map, mu)
+        new_points = np.argwhere(np.isnan(mu[0])).squeeze()
+        self._dead_reckoning(indices[new_points], observations[..., new_points])
 
-        dx = d_pi_dx(mu_camera_)
-        h = (m @ dx @ cam_t_map)[:3]
-        kt, _, _, _ = np.linalg.lstsq((h @ cv @ h.T + noise).T, (cv @ h.T).T)
-        k = kt.T
+        # m = self.camera.M
+        #
+        # noise_mat = np.eye(4) * noise.T[..., None]  # diagonalize and broadcast the noise
+        # cam_t_map = self.camera.pose @ inv_pose(self.imu.pose)  # pose converting from world to camera
+        # mu_camera_ = homo_mul(cam_t_map, mu)  # mu in the camera frame
+        #
+        # dx = d_pi_dx(mu_camera_)  # derivative of the camera model evaluated at mu in the cam frame
+        # h = (m @ dx.transpose([2, 0, 1]) @ cam_t_map)[..., :3]
+        # cv_ht = cv.transpose([2, 0, 1]) @ h.transpose([0, 2, 1])
+        # a = (h @ cv_ht + noise_mat).transpose([0, 2, 1])
+        # b = cv_ht.transpose([0, 2, 1])
+        # kt = np.linalg.solve(a, b)
+        # k = kt.transpose([0, 2, 1])
+        #
+        # self.map.points[:, indices] = mu + (k @ (observations - m @ pi(mu_camera_)).T[..., None]).squeeze().T
+        # self.map.cv[..., indices] = ((np.eye(3)[None, ...] - k @ h) @ cv.transpose([2, 0, 1])).transpose([1, 2, 0])
 
-        mu[:] = mu + k @ (observations - m @ pi(mu_camera_))
-        cv[:] = (np.eye(4) - k @ h) @ cv
+    def _dead_reckoning(self, indices, observations):
+        camera_frame = self.camera.img_to_camera_frame(observations)
+        self.map.points[:, indices] = homo_mul(self.imu.pose @ inv_pose(self.camera.pose), camera_frame)[:3]
 
     def plot(self):
         fig, ax = plt.subplots()

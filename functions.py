@@ -5,7 +5,11 @@ expm = scipy.linalg.expm
 
 
 def homo_mul(mat: np.ndarray, vec: np.ndarray):
-    return mat[:, :3] @ vec + mat[:, 3][..., None]
+    if vec.ndim > 1:
+        out = mat[:, :3] @ vec + mat[:, 3][..., None]
+    else:
+        out = mat[:, :3] @ vec + mat[:, 3]
+    return out
 
 
 def homogeneous(x: np.ndarray) -> np.ndarray:
