@@ -2,7 +2,11 @@ import unittest
 
 import numpy as np
 
-from functions import hat, vee, adj_hat, expm, inv_pose, d_pi_dx
+from functions import hat, vee, adj_hat, expm, inv_pose, d_pi_dx, pi
+
+
+def estimate_grad(dq, dq1, q):
+    return (pi(q + dq1[:, None]) - pi(q)) / dq
 
 
 class TestMath(unittest.TestCase):
@@ -42,6 +46,32 @@ class TestMath(unittest.TestCase):
         ])
         actual = d_pi_dx(x)
         self.assertTrue(np.allclose(expected, actual))
+
+    def test_pi_grad_check(self):
+        q = np.random.random((4, 1000)) * 2000 - 1000
+        dq = 1e-5
+        dq1 = np.array([dq, 0, 0, 0])
+        dq2 = np.array([0, dq, 0, 0])
+        dq3 = np.array([0, 0, dq, 0])
+        dq4 = np.array([0, 0, 0, dq])
+
+        result = d_pi_dx(q)
+
+        estimated_d1 = estimate_grad(dq, dq1, q)
+        d1 = result[:, 0]
+        self.assertTrue(np.allclose(estimated_d1, d1))
+
+        estimated_d2 = estimate_grad(dq, dq2, q)
+        d2 = result[:, 1]
+        self.assertTrue(np.allclose(estimated_d2, d2))
+
+        estimated_d3 = estimate_grad(dq, dq3, q)
+        d3 = result[:, 2]
+        self.assertTrue(np.allclose(estimated_d3, d3))
+
+        estimated_d4 = estimate_grad(dq, dq4, q)
+        d4 = result[:, 3]
+        self.assertTrue(np.allclose(estimated_d4, d4))
 
 
 if __name__ == '__main__':
