@@ -4,6 +4,10 @@ import scipy.linalg
 expm = scipy.linalg.expm
 
 
+def homo_mul(mat: np.ndarray, vec: np.ndarray):
+    return mat[:, :3] @ vec + mat[:, 3][..., None]
+
+
 def homogeneous(x: np.ndarray) -> np.ndarray:
     """
     Convert to homogeneous coordinates along the first dimension
@@ -156,3 +160,23 @@ def img_to_camera_frame(observation: np.ndarray, fsu, fsv, cu, cv, b):
     out[1] = out[2] * (observation[1] - cv) / fsv
     out[0] = out[2] * (observation[0] - cu) / fsu
     return out
+
+
+def pi(x: np.ndarray):
+    return x / x[2]
+
+
+def d_pi_dx(x: np.ndarray):
+    if x.ndim > 1:
+        out = np.zeros((4, 4, *x.shape[1:]))
+    else:
+        out = np.zeros((4, 4))
+    z_inv = 1 / x[2]
+
+    out[0, 0] = 1.
+    out[1, 1] = 1.
+    out[3, 3] = 1.
+    out[0, 2] = -x[0] * z_inv
+    out[1, 2] = -x[1] * z_inv
+    out[3, 2] = -x[3] * z_inv
+    return z_inv * out

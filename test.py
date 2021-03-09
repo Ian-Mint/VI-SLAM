@@ -1,10 +1,8 @@
-import math
 import unittest
-from math import cos, sin
 
 import numpy as np
 
-from functions import hat, vee, adj_hat, expm, inv_pose
+from functions import hat, vee, adj_hat, expm, inv_pose, d_pi_dx
 
 
 class TestMath(unittest.TestCase):
@@ -30,6 +28,19 @@ class TestMath(unittest.TestCase):
         pose = expm(hat(np.random.random(6)))
         expected = np.linalg.inv(pose)
         actual = inv_pose(pose)
+        self.assertTrue(np.allclose(expected, actual))
+
+    def test_d_pi_dx_broadcasting_works(self):
+        x = np.ones(4)
+        x[:3] = np.random.random(3)
+
+        expected = (1 / x[2]) * np.array([
+            [1, 0, -x[0] / x[2], 0],
+            [0, 1, -x[1] / x[2], 0],
+            [0, 0, 0, 0],
+            [0, 0, -x[3] / x[2], 1]
+        ])
+        actual = d_pi_dx(x)
         self.assertTrue(np.allclose(expected, actual))
 
 

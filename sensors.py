@@ -3,8 +3,9 @@ from typing import Tuple, List
 
 import matplotlib.pyplot as plt
 import numpy as np
+import scipy.stats
 
-from functions import hat, homogeneous, expm, img_to_camera_frame, inv_pose
+from functions import hat, homo_mul, expm, img_to_camera_frame, inv_pose, pi, d_pi_dx
 
 __all__ = ['Camera', 'Imu', 'Map', 'Runner']
 
@@ -60,6 +61,12 @@ class Camera:
         self._time = time_steps.squeeze()
 
         self.M = self._get_stereo_calibration(calibration, base)
+
+        n_points = len(self._time)
+        prior_covariance = 1
+        prior_variance = 2
+        _measurement_cv = np.zeros((3, 3)) + prior_covariance + np.diag([prior_variance] * 3)
+        self.noise = scipy.stats.multivariate_normal(cov=_measurement_cv)
 
     def img_to_camera_frame(self, observation):
         return img_to_camera_frame(observation, self._fsu, self._fsv, self._cu, self._cv, self._b)
@@ -164,8 +171,22 @@ class Runner:
         Use EKF to update the map points
         """
         time_delta, (indices, observations) = self.camera[idx]
-        camera_frame = self.camera.img_to_camera_frame(observations)
-        self.map.points[:, indices] = (self.imu.pose @ inv_pose(self.camera.pose) @ homogeneous(camera_frame))[:3]
+
+        noise = self.camera.noise.rvs(len(indices)).T
+        cv = self.map.cv[..., indices]
+        mu = self.map.points[:, indices]
+        m = self.camera.M
+
+        cam_t_map = self.camera.pose @ inv_pose(self.imu.pose)
+        mu_camera_ = homo_mul(cam_t_map, mu)
+
+        dx = d_pi_dx(mu_camera_)
+        h = (m @ dx @ cam_t_map)[:3]
+        kt, _, _, _ = np.linalg.lstsq((h @ cv @ h.T + noise).T, (cv @ h.T).T)
+        k = kt.T
+
+        mu[:] = mu + k @ (observations - m @ pi(mu_camera_))
+        cv[:] = (np.eye(4) - k @ h) @ cv
 
     def plot(self):
         fig, ax = plt.subplots()
@@ -176,3 +197,5 @@ class Runner:
         ax.set_ylabel("y distance from start (m)")
         plt.legend()
         plt.show()
+
+
