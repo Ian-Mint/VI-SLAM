@@ -173,29 +173,41 @@ class Runner:
         """
         time_delta, (indices, observations) = self.camera[idx]
 
-        noise = self.camera.noise.rvs(len(indices)).T
-        cv = self.map.cv[..., indices]
         mu = self.map.points[:, indices]
 
         new_points = np.argwhere(np.isnan(mu[0])).squeeze()
+        update_points = np.argwhere(np.logical_not(np.isnan(mu[0]))).squeeze()
         self._dead_reckoning(indices[new_points], observations[..., new_points])
 
-        # m = self.camera.M
-        #
-        # noise_mat = np.eye(4) * noise.T[..., None]  # diagonalize and broadcast the noise
-        # cam_t_map = self.camera.pose @ inv_pose(self.imu.pose)  # pose converting from world to camera
-        # mu_camera_ = homo_mul(cam_t_map, mu)  # mu in the camera frame
-        #
-        # dx = d_pi_dx(mu_camera_)  # derivative of the camera model evaluated at mu in the cam frame
-        # h = (m @ dx.transpose([2, 0, 1]) @ cam_t_map)[..., :3]
-        # cv_ht = cv.transpose([2, 0, 1]) @ h.transpose([0, 2, 1])
-        # a = (h @ cv_ht + noise_mat).transpose([0, 2, 1])
-        # b = cv_ht.transpose([0, 2, 1])
-        # kt = np.linalg.solve(a, b)
-        # k = kt.transpose([0, 2, 1])
-        #
-        # self.map.points[:, indices] = mu + (k @ (observations - m @ pi(mu_camera_)).T[..., None]).squeeze().T
-        # self.map.cv[..., indices] = ((np.eye(3)[None, ...] - k @ h) @ cv.transpose([2, 0, 1])).transpose([1, 2, 0])
+        update_indices = indices[update_points]
+        if len(update_indices) == 1:
+            observations = observations[..., update_points][..., None]
+            mu = mu[:, update_points][..., None]
+            cv = self.map.cv[..., update_indices][..., None]
+            noise = self.camera.noise.rvs()[..., None]
+        elif len(update_indices) > 1:
+            observations = observations[..., update_points]
+            mu = mu[:, update_points]
+            cv = self.map.cv[..., update_indices]
+            noise = self.camera.noise.rvs(len(update_points)).T
+        else:
+            return
+        m = self.camera.M
+
+        noise_mat = np.eye(4) * noise.T[..., None]  # diagonalize and broadcast the noise
+        cam_t_map = self.camera.pose @ inv_pose(self.imu.pose)  # pose converting from world to camera
+        mu_camera_ = homo_mul(cam_t_map, mu)  # mu in the camera frame
+
+        dx = d_pi_dx(mu_camera_)  # derivative of the camera model evaluated at mu in the cam frame
+        h = (m @ dx.transpose([2, 0, 1]) @ cam_t_map)[..., :3]
+        cv_ht = cv.transpose([2, 0, 1]) @ h.transpose([0, 2, 1])
+        a = (h @ cv_ht + noise_mat).transpose([0, 2, 1])
+        b = cv_ht.transpose([0, 2, 1])
+        kt = np.linalg.solve(a, b)
+        k = kt.transpose([0, 2, 1])
+
+        self.map.points[:, update_indices] = mu + (k @ (observations - m @ pi(mu_camera_)).T[..., None]).squeeze().T
+        self.map.cv[..., update_indices] = ((np.eye(3)[None, ...] - k @ h) @ cv.transpose([2, 0, 1])).transpose([1, 2, 0])
 
     def _dead_reckoning(self, indices, observations):
         camera_frame = self.camera.img_to_camera_frame(observations)
