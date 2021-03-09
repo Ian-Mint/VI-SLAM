@@ -1,4 +1,3 @@
-import numba
 import numpy as np
 import scipy.linalg
 
@@ -20,7 +19,6 @@ def homogeneous(x: np.ndarray) -> np.ndarray:
     return out
 
 
-@numba.njit()
 def inv_pose(x: np.ndarray):
     out = np.zeros_like(x)
     r = x[:3, :3]
@@ -32,7 +30,6 @@ def inv_pose(x: np.ndarray):
     return out
 
 
-@numba.njit()
 def _hat_map(x, out):
     """
     The 3x3 hat map
@@ -52,7 +49,6 @@ def _hat_map(x, out):
     out[2, 1] = x[0]
 
 
-@numba.njit()
 def _vee_map(x, out):
     """
     The 3x3 vee map
@@ -68,7 +64,6 @@ def _vee_map(x, out):
     out[2] = x[1, 0]
 
 
-@numba.njit()
 def hat(x):
     x_hat = np.zeros((4, 4))
 
@@ -77,7 +72,6 @@ def hat(x):
     return x_hat
 
 
-@numba.njit()
 def vee(x_hat):
     x = np.zeros(6)
 
@@ -86,7 +80,6 @@ def vee(x_hat):
     return x
 
 
-@numba.njit()
 def adj_hat(x):
     x_hat = np.zeros((6, 6))
 
@@ -96,7 +89,6 @@ def adj_hat(x):
     return x_hat
 
 
-@numba.njit()
 def coord_to_cell(point: np.ndarray, minima: np.ndarray, resolution: float) -> np.ndarray:
     """
     Discretize according to the map layout.
@@ -139,7 +131,6 @@ def get_coords(disparity) -> np.ndarray:
     return np.stack([x, y, z], axis=2)
 
 
-@numba.njit()
 def img_to_camera_frame(observation: np.ndarray, fsu, fsv, cu, cv, b):
     """
     convert stereo pixel observation coordinates to the camera frame
