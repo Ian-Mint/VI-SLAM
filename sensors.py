@@ -4,7 +4,7 @@ from typing import Tuple, List
 import matplotlib.pyplot as plt
 import numpy as np
 
-from functions import hat, homogeneous, expm, img_to_camera_frame
+from functions import hat, homogeneous, expm, img_to_camera_frame, inv_pose
 
 __all__ = ['Camera', 'Imu', 'Map', 'Runner']
 
@@ -53,7 +53,9 @@ class Imu:
 
 
 class Camera:
-    def __init__(self, features: np.ndarray, time_steps: np.ndarray, calibration: np.ndarray, base: np.ndarray):
+    def __init__(self, features: np.ndarray, time_steps: np.ndarray, calibration: np.ndarray, base: np.ndarray,
+                 pose: np.ndarray):
+        self.pose = inv_pose(pose)
         self._data = self._pre_process(features)
         self._time = time_steps.squeeze()
 
@@ -107,8 +109,10 @@ class Camera:
 
 class Map:
     def __init__(self, n_points: int):
+        prior_covariance = 1e-5
+        prior_variance = 0.25
+        self.cv = np.zeros((3, 3, n_points)) + prior_covariance + np.diag([prior_variance] * 3)[..., None]
         self.points = np.zeros((3, n_points))
-        self.cv = np.zeros((3, n_points, n_points))
 
 
 class Runner:
@@ -161,10 +165,7 @@ class Runner:
         """
         time_delta, (indices, observations) = self.camera[idx]
         camera_frame = self.camera.img_to_camera_frame(observations)
-        # todo: 1. indices of valid obs as array, 2. list of arrays containing valid obs, 3. Convert valid obs to xyz
-        #  in camera frame
-        # todo: convert from naive update to EKF
-        self.map.points[:, indices] = (self.imu.pose @ homogeneous(camera_frame))[:3]
+        self.map.points[:, indices] = (self.imu.pose @ inv_pose(self.camera.pose) @ homogeneous(camera_frame))[:3]
 
     def plot(self):
         fig, ax = plt.subplots()
