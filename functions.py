@@ -2,7 +2,6 @@ import numba
 import numpy as np
 import scipy.linalg
 
-
 expm = scipy.linalg.expm
 
 
@@ -138,3 +137,31 @@ def get_coords(disparity) -> np.ndarray:
     y = np.expand_dims((v - cv) / fsu, axis=1) * z
     x = np.expand_dims((u - cu) / fsu, axis=0) * z
     return np.stack([x, y, z], axis=2)
+
+
+@numba.njit()
+def img_to_camera_frame(observation: np.ndarray, fsu, fsv, cu, cv, b):
+    """
+    convert stereo pixel observation coordinates to the camera frame
+
+    Args:
+        observation: (xL, yL, xR, yR)
+        fsu:
+        fsv:
+        cu:
+        cv:
+        b:
+
+    Returns:
+        (x, y, z) in camera frame of reference
+    """
+    if observation.ndim == 2:
+        out = np.zeros((3, observation.shape[1]))
+    elif observation.ndim == 1:
+        out = np.zeros(3)
+    else:
+        raise RuntimeError("Observations can only be 1D or 2D")
+    out[2] = fsu * b / (observation[0] - observation[2])
+    out[1] = out[2] * (observation[1] - cv) / fsv
+    out[0] = out[2] * (observation[0] - cu) / fsu
+    return out
