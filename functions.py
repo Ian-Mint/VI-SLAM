@@ -1,4 +1,5 @@
 import numpy as np
+import numba
 import scipy.linalg
 
 expm = scipy.linalg.expm
@@ -184,3 +185,14 @@ def d_pi_dx(x: np.ndarray):
     out[1, 2] = -x[1] * z_inv
     out[3, 2] = -x[3] * z_inv
     return z_inv * out
+
+
+@numba.njit()
+def lstsq_broadcast(a, b):
+    x = np.zeros_like(b)
+    for i in range(len(a)):
+        a_mat = a[i]
+        b_mat = b[i]
+        x_mat, _, _, _ = np.linalg.lstsq(a_mat, b_mat)
+        x[i] = x_mat
+    return x

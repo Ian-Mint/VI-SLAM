@@ -5,11 +5,19 @@ import matplotlib.pyplot as plt
 import numpy as np
 import scipy.stats
 
-from functions import hat, homo_mul, expm, img_to_camera_frame, inv_pose, pi, d_pi_dx
+from functions import hat, homo_mul, expm, img_to_camera_frame, inv_pose, pi, d_pi_dx, lstsq_broadcast
 
 __all__ = ['Camera', 'Imu', 'Map', 'Runner']
 
 np.seterr(divide='raise', invalid='ignore')  # raise an error on divide by zero
+
+
+class FakeNoise:
+    def __init__(self, size):
+        self.size = size
+
+    def rvs(self, k=1):
+        return np.zeros((k, self.size)).squeeze()
 
 
 class Imu:
@@ -62,10 +70,10 @@ class Camera:
 
         self.M = self._get_stereo_calibration(calibration, base)
 
-        prior_covariance = 1
-        prior_variance = 2
+        covariance = 0.5
+        variance = 3  # 4-5 recommended
         dim = 4
-        _measurement_cv = np.zeros((dim, dim)) + prior_covariance + np.diag([prior_variance] * dim)
+        _measurement_cv = np.zeros((dim, dim)) + covariance + np.diag([variance] * dim)
         self.noise = scipy.stats.multivariate_normal(cov=_measurement_cv)
 
     def img_to_camera_frame(self, observation):
@@ -116,8 +124,8 @@ class Camera:
 
 class Map:
     def __init__(self, n_points: int):
-        prior_covariance = 1e-5
-        prior_variance = 0.25
+        prior_covariance = 0.1
+        prior_variance = 0.5
         self.cv = np.zeros((3, 3, n_points)) + prior_covariance + np.diag([prior_variance] * 3)[..., None]
         self.points = np.zeros((3, n_points))
         self.points[:] = np.nan
@@ -158,7 +166,6 @@ class Runner:
             if (i + 1) % report_iterations == 0:
                 print(f'Sample {(i + 1) // 1000} thousand in {time.time() - start: 02f}s')
                 start = time.time()
-        self.plot()
 
     def _step(self, idx):
         self._imu_update(idx)
@@ -171,6 +178,7 @@ class Runner:
         """
         Use EKF to update the map points
         """
+        # todo: filter out improbable updates
         time_delta, (indices, observations) = self.camera[idx]
 
         mu = self.map.points[:, indices]
@@ -200,14 +208,22 @@ class Runner:
 
         dx = d_pi_dx(mu_camera_)  # derivative of the camera model evaluated at mu in the cam frame
         h = (m @ dx.transpose([2, 0, 1]) @ cam_t_map)[..., :3]
+
         cv_ht = cv.transpose([2, 0, 1]) @ h.transpose([0, 2, 1])
         a = (h @ cv_ht + noise_mat).transpose([0, 2, 1])
         b = cv_ht.transpose([0, 2, 1])
-        kt = np.linalg.solve(a, b)
+
+        kt = lstsq_broadcast(a, b)
         k = kt.transpose([0, 2, 1])
 
-        self.map.points[:, update_indices] = mu + (k @ (observations - m @ pi(mu_camera_)).T[..., None]).squeeze().T
-        self.map.cv[..., update_indices] = ((np.eye(3)[None, ...] - k @ h) @ cv.transpose([2, 0, 1])).transpose([1, 2, 0])
+        predicted_observations = m @ pi(mu_camera_)
+        innovation = observations - predicted_observations
+        # assert np.all(np.linalg.norm(innovation, axis=0) < 100), \
+        #     f"Innovation is very large {np.linalg.norm(innovation, axis=0)}"
+
+        self.map.points[:, update_indices] = mu + (k @ innovation.T[..., None]).squeeze().T
+        self.map.cv[..., update_indices] = ((np.eye(3)[None, ...] - k @ h) @ cv.transpose([2, 0, 1])).transpose(
+            [1, 2, 0])
 
     def _dead_reckoning(self, indices, observations):
         camera_frame = self.camera.img_to_camera_frame(observations)
@@ -222,5 +238,3 @@ class Runner:
         ax.set_ylabel("y distance from start (m)")
         plt.legend()
         plt.show()
-
-
