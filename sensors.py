@@ -128,7 +128,10 @@ class Map:
         prior_variance = 0.5
         self.cv = np.zeros((3, 3, n_points)) + prior_covariance + np.diag([prior_variance] * 3)[..., None]
         self.points = np.zeros((3, n_points))
-        self.points[:] = np.nan
+        self.points[:2] = np.nan
+
+    def update_points(self, indices, update):
+        self.points[:, indices] = update[:]
 
 
 class Runner:
@@ -215,7 +218,7 @@ class Runner:
         # assert np.all(np.linalg.norm(innovation, axis=0) < 10), \
         #     f"Innovation is very large {np.linalg.norm(innovation, axis=0)}"
 
-        self.map.points[:, update_indices] = mu + (k @ innovation.T[..., None]).squeeze().T
+        self.map.update_points(update_indices, mu + (k @ innovation.T[..., None]).squeeze().T)
         self.map.cv[..., update_indices] = ((np.eye(3)[None, ...] - k @ h) @ cv.transpose([2, 0, 1])).transpose(
             [1, 2, 0])
         return
@@ -238,6 +241,7 @@ class Runner:
 
         """
         map_frame = self.observation_to_world(observations)
+        self.map.update_points(indices, map_frame)
         self.map.points[:, indices] = map_frame
 
     def observation_to_world(self, observations):
