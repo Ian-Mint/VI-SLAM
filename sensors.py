@@ -63,12 +63,25 @@ class Imu:
 
 class Camera:
     def __init__(self, features: np.ndarray, time_steps: np.ndarray, calibration: np.ndarray, base: np.ndarray,
-                 pose: np.ndarray):
+                 pose: np.ndarray, depth_threshold=100):
+        """
+
+        Args:
+            features:
+            time_steps:
+            calibration:
+            base:
+            pose:
+            depth_threshold:
+        """
+        self.M = self._get_stereo_calibration(calibration, base)
+        self.min_depth = 0.5
+        self.max_depth = depth_threshold
+        self.inv_pose = pose
         self.pose = inv_pose(pose)
         self._data = self._pre_process(features)
         self._time = time_steps.squeeze()
 
-        self.M = self._get_stereo_calibration(calibration, base)
 
         covariance = 0.5
         variance = 3  # 4-5 recommended
@@ -78,6 +91,12 @@ class Camera:
 
     def img_to_camera_frame(self, observation):
         return img_to_camera_frame(observation, self._fsu, self._fsv, self._cu, self._cv, self._b)
+
+    def img_to_imu_frame(self, observation):
+        # todo: untested
+        camera_obs = img_to_camera_frame(observation, self._fsu, self._fsv, self._cu, self._cv, self._b)
+        imu_obs = homo_mul(self.inv_pose, camera_obs)[:3]
+        return imu_obs
 
     def _get_stereo_calibration(self, k, b):
         self._fsu = k[0, 0]
@@ -93,13 +112,16 @@ class Camera:
             [0, self._fsv, self._cv, 0]
         ])
 
-    @staticmethod
-    def _pre_process(features):
+    def _pre_process(self, features):
         valid_indices = []
         valid_features = []
         for t in range(features.shape[-1]):
             zt = features[..., t]
             indices = np.argwhere(zt[0] != -1).squeeze()
+            disparity = zt[0, indices] - zt[2, indices]
+            depth = self._fsu * self._b / disparity
+            indices = indices[np.logical_and(depth > self.min_depth, depth < self.max_depth)]
+
             valid_indices.append(indices)
             valid_features.append(zt[:, indices])
         return list(zip(valid_indices, valid_features))
@@ -203,7 +225,7 @@ class Runner:
         observations = observations[..., update_points]
         mu = mu[:, update_points]
         cv = self.map.cv[..., update_indices]
-        if len(update_indices) == 1:
+        if isinstance(update_indices, np.int64):
             noise = self.camera.noise.rvs()
             observations, mu, cv, noise = expand_dim([observations, mu, cv, noise], -1)
         elif len(update_indices) > 1:
@@ -227,9 +249,9 @@ class Runner:
         # assert np.all(np.linalg.norm(innovation, axis=0) < 10), \
         #     f"Innovation is very large {np.linalg.norm(innovation, axis=0)}"
 
-        self.map.update_points(update_indices, mu + (k @ innovation.T[..., None]).squeeze().T)
+        self.map.update_points(update_indices, mu.squeeze() + (k @ innovation.T[..., None]).squeeze().T)
         self.map.update_cv(
-            update_indices, ((np.eye(3)[None, ...] - k @ h) @ cv.transpose([2, 0, 1])).transpose([1, 2, 0]))
+            update_indices, ((np.eye(3)[None, ...] - k @ h) @ cv.transpose([2, 0, 1])).transpose([1, 2, 0]).squeeze())
         return
 
     def points_to_observations(self, mu):
