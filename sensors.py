@@ -185,7 +185,7 @@ class Runner:
 
         new_points = np.argwhere(np.isnan(mu[0])).squeeze()
         update_points = np.argwhere(np.logical_not(np.isnan(mu[0]))).squeeze()
-        self._dead_reckoning(indices[new_points], observations[..., new_points])
+        self._initialize_map_points(indices[new_points], observations[..., new_points])
 
         update_indices = indices[update_points]
         if len(update_indices) == 1:
@@ -200,14 +200,11 @@ class Runner:
             noise = self.camera.noise.rvs(len(update_points)).T
         else:
             return
-        m = self.camera.M
-
         noise_mat = np.eye(4) * noise.T[..., None]  # diagonalize and broadcast the noise
-        cam_t_map = self.camera.pose @ inv_pose(self.imu.pose)  # pose converting from world to camera
-        mu_camera_ = homo_mul(cam_t_map, mu)  # mu in the camera frame
 
-        dx = d_pi_dx(mu_camera_)  # derivative of the camera model evaluated at mu in the cam frame
-        h = (m @ dx.transpose([2, 0, 1]) @ cam_t_map)[..., :3]
+        cam_t_map, jacobian, predicted_observations = self.points_to_observations(mu)
+
+        h = (self.camera.M @ jacobian.transpose([2, 0, 1]) @ cam_t_map)[..., :3]
 
         cv_ht = cv.transpose([2, 0, 1]) @ h.transpose([0, 2, 1])
         a = (h @ cv_ht + noise_mat).transpose([0, 2, 1])
@@ -216,18 +213,48 @@ class Runner:
         kt = lstsq_broadcast(a, b)
         k = kt.transpose([0, 2, 1])
 
-        predicted_observations = m @ pi(mu_camera_)
         innovation = observations - predicted_observations
-        # assert np.all(np.linalg.norm(innovation, axis=0) < 100), \
-        #     f"Innovation is very large {np.linalg.norm(innovation, axis=0)}"
+        assert np.all(np.linalg.norm(innovation, axis=0) < 10), \
+            f"Innovation is very large {np.linalg.norm(innovation, axis=0)}"
 
         self.map.points[:, update_indices] = mu + (k @ innovation.T[..., None]).squeeze().T
         self.map.cv[..., update_indices] = ((np.eye(3)[None, ...] - k @ h) @ cv.transpose([2, 0, 1])).transpose(
             [1, 2, 0])
+        return
 
-    def _dead_reckoning(self, indices, observations):
+    def points_to_observations(self, mu):
+        cam_t_map = self.camera.pose @ inv_pose(self.imu.pose)  # pose converting from world to camera
+        mu_camera_ = homo_mul(cam_t_map, mu)  # mu in the camera frame
+        jacobian = d_pi_dx(mu_camera_)  # derivative of the camera model evaluated at mu in the cam frame
+        predicted_observations = self.camera.M @ pi(mu_camera_)
+        return cam_t_map, jacobian, predicted_observations
+
+    def _initialize_map_points(self, indices, observations):
+        """
+        Initialize map points
+        Args:
+            indices:
+            observations:
+
+        Returns:
+
+        """
+        map_frame = self.observation_to_world(observations)
+        self.map.points[:, indices] = map_frame
+
+    def observation_to_world(self, observations):
+        """
+        Converts valid stereo image observations to xyz points in the world
+
+        Args:
+            observations: (xL, yL, xR, yR)
+
+        Returns:
+            (x, y, z)
+        """
         camera_frame = self.camera.img_to_camera_frame(observations)
-        self.map.points[:, indices] = homo_mul(self.imu.pose @ inv_pose(self.camera.pose), camera_frame)[:3]
+        map_frame = homo_mul(self.imu.pose @ inv_pose(self.camera.pose), camera_frame)[:3]
+        return map_frame
 
     def plot(self):
         fig, ax = plt.subplots()
