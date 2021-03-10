@@ -127,11 +127,20 @@ class Map:
         prior_covariance = 0.1
         prior_variance = 0.5
         self.cv = np.zeros((3, 3, n_points)) + prior_covariance + np.diag([prior_variance] * 3)[..., None]
+        self._zero_z_var()
         self.points = np.zeros((3, n_points))
         self.points[:2] = np.nan
 
+    def _zero_z_var(self):
+        self.cv[:2, 2] = 0.
+        self.cv[2, :2] = 0.
+
     def update_points(self, indices, update):
-        self.points[:, indices] = update[:]
+        self.points[:2, indices] = update[:2]
+
+    def update_cv(self, indices, update):
+        self.cv[..., indices] = update
+        self._zero_z_var()
 
 
 class Runner:
@@ -219,8 +228,8 @@ class Runner:
         #     f"Innovation is very large {np.linalg.norm(innovation, axis=0)}"
 
         self.map.update_points(update_indices, mu + (k @ innovation.T[..., None]).squeeze().T)
-        self.map.cv[..., update_indices] = ((np.eye(3)[None, ...] - k @ h) @ cv.transpose([2, 0, 1])).transpose(
-            [1, 2, 0])
+        self.map.update_cv(
+            update_indices, ((np.eye(3)[None, ...] - k @ h) @ cv.transpose([2, 0, 1])).transpose([1, 2, 0]))
         return
 
     def points_to_observations(self, mu):
