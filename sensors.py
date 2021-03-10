@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import scipy.stats
 
-from functions import hat, homo_mul, expm, img_to_camera_frame, inv_pose, pi, d_pi_dx, lstsq_broadcast
+from functions import hat, homo_mul, expm, img_to_camera_frame, inv_pose, pi, d_pi_dx, lstsq_broadcast, expand_dim
 
 __all__ = ['Camera', 'Imu', 'Map', 'Runner']
 
@@ -188,15 +188,13 @@ class Runner:
         self._initialize_map_points(indices[new_points], observations[..., new_points])
 
         update_indices = indices[update_points]
+        observations = observations[..., update_points]
+        mu = mu[:, update_points]
+        cv = self.map.cv[..., update_indices]
         if len(update_indices) == 1:
-            observations = observations[..., update_points][..., None]
-            mu = mu[:, update_points][..., None]
-            cv = self.map.cv[..., update_indices][..., None]
-            noise = self.camera.noise.rvs()[..., None]
+            noise = self.camera.noise.rvs()
+            observations, mu, cv, noise = expand_dim([observations, mu, cv, noise], -1)
         elif len(update_indices) > 1:
-            observations = observations[..., update_points]
-            mu = mu[:, update_points]
-            cv = self.map.cv[..., update_indices]
             noise = self.camera.noise.rvs(len(update_points)).T
         else:
             return
@@ -214,8 +212,8 @@ class Runner:
         k = kt.transpose([0, 2, 1])
 
         innovation = observations - predicted_observations
-        assert np.all(np.linalg.norm(innovation, axis=0) < 10), \
-            f"Innovation is very large {np.linalg.norm(innovation, axis=0)}"
+        # assert np.all(np.linalg.norm(innovation, axis=0) < 10), \
+        #     f"Innovation is very large {np.linalg.norm(innovation, axis=0)}"
 
         self.map.points[:, update_indices] = mu + (k @ innovation.T[..., None]).squeeze().T
         self.map.cv[..., update_indices] = ((np.eye(3)[None, ...] - k @ h) @ cv.transpose([2, 0, 1])).transpose(

@@ -1,3 +1,5 @@
+from typing import List
+
 import numpy as np
 import numba
 import scipy.linalg
@@ -196,3 +198,20 @@ def lstsq_broadcast(a, b):
         x_mat, _, _, _ = np.linalg.lstsq(a_mat, b_mat)
         x[i] = x_mat
     return x
+
+
+def expand_dim(arrays: List[np.ndarray], axis: int) -> List[np.ndarray]:
+    """
+    Expand all dimensions in arrays along the specified axis
+
+    Args:
+        arrays: a list of numpy arrays
+        axis: the axis along which to expand
+
+    Returns:
+        List of new views of the original arrays with axis expanded
+    """
+    results = []
+    for arr in arrays:
+        results.append(np.expand_dims(arr, axis=-1))
+    return results
