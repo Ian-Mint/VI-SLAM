@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import scipy.stats
 
-from functions import hat, homo_mul, expm, img_to_camera_frame, inv_pose, pi, d_pi_dx, lstsq_broadcast, expand_dim
+from functions import *
 
 __all__ = ['Camera', 'Imu', 'Map', 'Runner']
 
@@ -21,21 +21,31 @@ class FakeNoise:
 
 
 class Imu:
-    def __init__(self, linear_velocity: np.ndarray, angular_velocity: np.ndarray, time_steps: np.ndarray):
+    def __init__(self, linear_velocity: np.ndarray, angular_velocity: np.ndarray, time_steps: np.ndarray,
+                 variance: np.ndarray):
         assert angular_velocity.shape == linear_velocity.shape
         self._time = np.squeeze(time_steps)
         self._data = np.concatenate([linear_velocity, angular_velocity], axis=0)
+        self._variance = variance
 
         self.pose = expm(np.zeros((4, 4)))
         self.cv = np.eye(6)  # todo: initialize covariance
 
         self.trail = np.zeros((2, len(self._time)))
+        self.noise = self._get_noise()
 
-    def update(self, idx):
+    def _get_noise(self):
+        dim = 6
+        _measurement_cv = np.zeros((dim, dim)) + np.diag(self._variance)
+        return scipy.stats.multivariate_normal(cov=_measurement_cv)
+
+    def predict(self, idx):
         time_delta, twist_rate = self[idx]
-        self.pose = self.pose @ expm(time_delta * hat(twist_rate))  # todo: consider preprocessing the second term
-        # s = expm(-time * adj_hat(twist_rate))
-        # self.cv = s @ self.cv @ s.T + noise
+        noise = self.noise.rvs()
+
+        self.pose = self.pose @ expm(time_delta * hat(twist_rate))
+        s = expm(-time_delta * adj_hat(twist_rate))
+        self.cv = s @ self.cv @ s.T + noise
 
         self.trail[:, idx] = self.xy_coords
 
@@ -82,12 +92,15 @@ class Camera:
         self._data = self._pre_process(features)
         self._time = time_steps.squeeze()
 
+        self.noise = self._get_noise()
 
+    @staticmethod
+    def _get_noise():
         covariance = 0.5
         variance = 3  # 4-5 recommended
         dim = 4
         _measurement_cv = np.zeros((dim, dim)) + covariance + np.diag([variance] * dim)
-        self.noise = scipy.stats.multivariate_normal(cov=_measurement_cv)
+        return scipy.stats.multivariate_normal(cov=_measurement_cv)
 
     def img_to_camera_frame(self, observation):
         return img_to_camera_frame(observation, self._fsu, self._fsv, self._cu, self._cv, self._b)
@@ -202,17 +215,9 @@ class Runner:
                 start = time.time()
 
     def _step(self, idx):
-        self._imu_update(idx)
-        self._map_update(idx)
+        self.imu.predict(idx)
 
-    def _imu_update(self, idx):
-        self.imu.update(idx)
-
-    def _map_update(self, idx):
-        """
-        Use EKF to update the map points
-        """
-        # todo: filter out improbable updates
+        # map update
         time_delta, (indices, observations) = self.camera[idx]
 
         mu = self.map.points[:, indices]
@@ -232,7 +237,7 @@ class Runner:
             noise = self.camera.noise.rvs(len(update_points)).T
         else:
             return
-        noise_mat = np.eye(4) * noise.T[..., None]  # diagonalize and broadcast the noise
+        noise_mat = vector_to_diag(noise)  # diagonalize and broadcast the noise
 
         cam_t_map, jacobian, predicted_observations = self.points_to_observations(mu)
 

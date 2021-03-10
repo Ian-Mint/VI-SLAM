@@ -4,6 +4,9 @@ import numpy as np
 import numba
 import scipy.linalg
 
+__all__ = ['expm', 'homogeneous', 'homo_mul', 'inv_pose', 'hat', 'pi', 'd_pi_dx', 'vee', 'img_to_camera_frame',
+           'adj_hat', 'lstsq_broadcast', 'coord_to_cell', 'get_coords', 'expand_dim', 'vector_to_diag']
+
 expm = scipy.linalg.expm
 
 
@@ -215,3 +218,7 @@ def expand_dim(arrays: List[np.ndarray], axis: int) -> List[np.ndarray]:
     for arr in arrays:
         results.append(np.expand_dims(arr, axis=-1))
     return results
+
+
+def vector_to_diag(noise):
+    return np.eye(4) * noise.T[..., None]

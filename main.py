@@ -23,8 +23,11 @@ if __name__ == '__main__':
     n_points = features.shape[1]
     n_samples = len(time_steps)
 
-    runner = Runner(Camera(features, time_steps, k, b, imu_T_cam),
-                    Imu(linear_velocity, angular_velocity, time_steps),
+    gyro_var = 1e-6
+    accel_var = 1e-4
+    imu_variance = np.array([accel_var, accel_var, accel_var, gyro_var, gyro_var, gyro_var])
+    runner = Runner(Camera(features, time_steps, k, b, imu_T_cam, depth_threshold=50),
+                    Imu(linear_velocity, angular_velocity, time_steps, imu_variance),
                     Map(n_points),
                     n_samples, plot_interval=5000)
     start = time.time()
