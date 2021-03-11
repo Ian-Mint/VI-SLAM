@@ -49,7 +49,7 @@ class TestMath(unittest.TestCase):
 
     def test_pi_grad_check(self):
         q = np.random.random((4, 1000)) * 2000 - 1000
-        dq = 1e-5
+        dq = 1e-6
         dq1 = np.array([dq, 0, 0, 0])
         dq2 = np.array([0, dq, 0, 0])
         dq3 = np.array([0, 0, dq, 0])

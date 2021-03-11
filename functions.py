@@ -5,9 +5,31 @@ import numba
 import scipy.linalg
 
 __all__ = ['expm', 'homogeneous', 'homo_mul', 'inv_pose', 'hat', 'pi', 'd_pi_dx', 'vee', 'img_to_camera_frame',
-           'adj_hat', 'lstsq_broadcast', 'coord_to_cell', 'get_coords', 'expand_dim', 'vector_to_diag']
+           'adj_hat', 'lstsq_broadcast', 'coord_to_cell', 'get_coords', 'expand_dim', 'vector_to_diag', 'pose_to_axis',
+           'pose_to_angle', 'o_dot', 'kalman_gain']
 
 expm = scipy.linalg.expm
+logm = scipy.linalg.logm
+
+
+def o_dot(x):
+    out = np.zeros((4, 6))
+    out[:3, :3] = np.eye(3)
+    out[:3, 3:] = -hat(x)
+
+
+def pose_to_angle(pose):
+    return np.arccos((np.trace(pose[:3, :3], axis1=0, axis2=1) - 1) / 2)
+
+
+def pose_to_axis(pose):
+    out = np.zeros(3)
+    out[0] = pose[2, 1] - pose[1, 2]
+    out[1] = pose[0, 2] - pose[2, 0]
+    out[2] = pose[1, 0] - pose[0, 1]
+
+    angle = pose_to_angle(pose)
+    return out / (2 * np.sin(angle))
 
 
 def homo_mul(mat: np.ndarray, vec: np.ndarray):
@@ -222,3 +244,12 @@ def expand_dim(arrays: List[np.ndarray], axis: int) -> List[np.ndarray]:
 
 def vector_to_diag(noise):
     return np.eye(4) * noise.T[..., None]
+
+
+def kalman_gain(cv, h, noise):
+    cv_times_h_transpose = cv.transpose([2, 0, 1]) @ h.transpose([0, 2, 1])
+    a = (h @ cv_times_h_transpose + noise).transpose([0, 2, 1])
+    b = cv_times_h_transpose.transpose([0, 2, 1])
+    kt = lstsq_broadcast(a, b)
+    k = kt.transpose([0, 2, 1])
+    return k

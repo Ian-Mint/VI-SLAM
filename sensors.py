@@ -26,28 +26,37 @@ class Imu:
         assert angular_velocity.shape == linear_velocity.shape
         self._time = np.squeeze(time_steps)
         self._data = np.concatenate([linear_velocity, angular_velocity], axis=0)
-        self._variance = variance
+        self._variance = np.diag(variance)
 
         self.pose = expm(np.zeros((4, 4)))
-        self.cv = np.eye(6)  # todo: initialize covariance
+        self.cv = np.eye(6) * 0.25
 
         self.trail = np.zeros((2, len(self._time)))
         self.noise = self._get_noise()
 
     def _get_noise(self):
         dim = 6
-        _measurement_cv = np.zeros((dim, dim)) + np.diag(self._variance)
+        _measurement_cv = np.zeros((dim, dim)) + self._variance
         return scipy.stats.multivariate_normal(cov=_measurement_cv)
 
     def predict(self, idx):
         time_delta, twist_rate = self[idx]
         noise = self.noise.rvs()
 
-        self.pose = self.pose @ expm(time_delta * hat(twist_rate))
+        self.update_pose(time_delta * twist_rate)
         s = expm(-time_delta * adj_hat(twist_rate))
         self.cv = s @ self.cv @ s.T + noise
 
         self.trail[:, idx] = self.xy_coords
+
+    def update_pose(self, twist: np.ndarray):
+        """
+        Apply hat map and matrix exponential to twist, then matmul with the original pose
+
+        Args:
+            twist: 6-long numpy array
+        """
+        self.pose = self.pose @ expm(hat(twist))
 
     @property
     def xy_coords(self):
@@ -220,51 +229,55 @@ class Runner:
         # map update
         time_delta, (indices, observations) = self.camera[idx]
 
-        mu = self.map.points[:, indices]
+        mu_m = self.map.points[:, indices]
 
-        new_points = np.argwhere(np.isnan(mu[0])).squeeze()
-        update_points = np.argwhere(np.logical_not(np.isnan(mu[0]))).squeeze()
+        new_points = np.argwhere(np.isnan(mu_m[0])).squeeze()
+        update_points = np.argwhere(np.logical_not(np.isnan(mu_m[0]))).squeeze()
         self._initialize_map_points(indices[new_points], observations[..., new_points])
 
         update_indices = indices[update_points]
         observations = observations[..., update_points]
-        mu = mu[:, update_points]
-        cv = self.map.cv[..., update_indices]
+        mu_m = mu_m[:, update_points]
+        cv_m = self.map.cv[..., update_indices]
+        cv_t = self.imu.cv
         if isinstance(update_indices, np.int64):
-            noise = self.camera.noise.rvs()
-            observations, mu, cv, noise = expand_dim([observations, mu, cv, noise], -1)
+            noise_m = self.camera.noise.rvs()
+            observations, mu_m, cv_m, noise_m = expand_dim([observations, mu_m, cv_m, noise_m], -1)
         elif len(update_indices) > 1:
-            noise = self.camera.noise.rvs(len(update_points)).T
+            noise_m = self.camera.noise.rvs(len(update_points)).T
         else:
-            return
-        noise_mat = vector_to_diag(noise)  # diagonalize and broadcast the noise
+            return  # we got no observations
+        noise_mat_m = vector_to_diag(noise_m)  # diagonalize and broadcast the noise
 
-        cam_t_map, jacobian, predicted_observations = self.points_to_observations(mu)
+        cam_t_map, dpi_dx_at_mu, predicted_observations = self.points_to_observations(mu_m)
 
-        h = (self.camera.M @ jacobian.transpose([2, 0, 1]) @ cam_t_map)[..., :3]
+        m_times_dpi_dx_at_mu = self.camera.M @ dpi_dx_at_mu.transpose([2, 0, 1])
+        h_t = -m_times_dpi_dx_at_mu @ self.camera.pose @ o_dot(homo_mul(inv_pose(self.imu.pose), mu_m))
+        h_m = (m_times_dpi_dx_at_mu @ cam_t_map)[..., :3]
 
-        cv_ht = cv.transpose([2, 0, 1]) @ h.transpose([0, 2, 1])
-        a = (h @ cv_ht + noise_mat).transpose([0, 2, 1])
-        b = cv_ht.transpose([0, 2, 1])
-
-        kt = lstsq_broadcast(a, b)
-        k = kt.transpose([0, 2, 1])
+        k_m = kalman_gain(cv_m, h_m, noise_mat_m)
+        k_t = kalman_gain(cv_t, h_t, noise_mat_m)
 
         innovation = observations - predicted_observations
         # assert np.all(np.linalg.norm(innovation, axis=0) < 10), \
         #     f"Innovation is very large {np.linalg.norm(innovation, axis=0)}"
 
-        self.map.update_points(update_indices, mu.squeeze() + (k @ innovation.T[..., None]).squeeze().T)
+        self.map.update_points(update_indices, mu_m.squeeze() + (k_m @ innovation.T[..., None]).squeeze().T)
         self.map.update_cv(
-            update_indices, ((np.eye(3)[None, ...] - k @ h) @ cv.transpose([2, 0, 1])).transpose([1, 2, 0]).squeeze())
+            update_indices,
+            ((np.eye(3)[None, ...] - k_m @ h_m) @ cv_m.transpose([2, 0, 1])).transpose([1, 2, 0]).squeeze()
+        )
+
+        self.imu.update_pose(k_t @ innovation)
+        self.imu.cv = (np.eye(4) - k_t @ h_t) @ self.imu.cv
         return
 
     def points_to_observations(self, mu):
         cam_t_map = self.camera.pose @ inv_pose(self.imu.pose)  # pose converting from world to camera
         mu_camera_ = homo_mul(cam_t_map, mu)  # mu in the camera frame
-        jacobian = d_pi_dx(mu_camera_)  # derivative of the camera model evaluated at mu in the cam frame
+        dpi_dx_at_mu = d_pi_dx(mu_camera_)  # derivative of the camera model evaluated at mu in the cam frame
         predicted_observations = self.camera.M @ pi(mu_camera_)
-        return cam_t_map, jacobian, predicted_observations
+        return cam_t_map, dpi_dx_at_mu, predicted_observations
 
     def _initialize_map_points(self, indices, observations):
         """
