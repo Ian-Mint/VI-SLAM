@@ -1,15 +1,13 @@
-from typing import List
-import time
+from typing import List, Union
 
-import numpy as np
 import numba
+import numpy as np
 import scipy.linalg
 import scipy.sparse as sparse
-import scipy.sparse.linalg as sparse_linalg
 
 __all__ = ['expm', 'homogeneous', 'homo_mul', 'inv_pose', 'hat', 'pi', 'd_pi_dx', 'vee', 'img_to_camera_frame',
            'adj_hat', 'lstsq_broadcast', 'coord_to_cell', 'get_coords', 'expand_dim', 'vector_to_diag', 'pose_to_axis',
-           'pose_to_angle', 'o_dot', 'kalman_gain', 'vector_to_bsr', 'bsr_kalman_gain']
+           'pose_to_angle', 'o_dot', 'kalman_gain', 'vector_to_bsr', 'kalman_gain']
 
 expm = scipy.linalg.expm
 logm = scipy.linalg.logm
@@ -264,19 +262,14 @@ def vector_to_bsr(x: np.ndarray):
     return sparse.bsr_matrix(dia)
 
 
-def kalman_gain(cv: np.ndarray, h: np.ndarray, noise: np.ndarray):
-    if cv.ndim > 2:
-        cv = cv.transpose([2, 0, 1])
-    cv_times_h_transpose = cv @ h.transpose([0, 2, 1])
-    a = (h @ cv_times_h_transpose + noise).transpose([0, 2, 1])
-    b = cv_times_h_transpose.transpose([0, 2, 1])
-    kt = lstsq_broadcast(a, b)
-    k = kt.transpose([0, 2, 1])
-    return k
+hint = Union[sparse.bsr_matrix, np.ndarray]
 
 
-def bsr_kalman_gain(cv: sparse.bsr_matrix, h: sparse.bsr_matrix, noise: sparse.bsr_matrix) -> np.ndarray:
+def kalman_gain(cv: hint, h: hint, noise: hint) -> np.ndarray:
     b = cv @ h.T
     a = h @ b + noise
-    kt, *_ = scipy.linalg.lstsq(a.T.toarray(), b.T.toarray(), overwrite_a=True, overwrite_b=True)
+    if isinstance(a, sparse.bsr_matrix):
+        kt, *_ = scipy.linalg.lstsq(a.T.toarray(), b.T.toarray(), overwrite_a=True, overwrite_b=True)
+    else:
+        kt, *_ = scipy.linalg.lstsq(a.T, b.T, overwrite_a=True, overwrite_b=True)
     return kt.T

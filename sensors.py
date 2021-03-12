@@ -289,39 +289,37 @@ class Runner:
             noise_m = self.camera.noise.rvs(len(update_indices)).T
         else:
             return  # we got no observations
-        noise_mat_m = vector_to_bsr(noise_m)  # diagonalize and broadcast the noise
+        bsr_noise = vector_to_bsr(noise_m)  # diagonalize and broadcast the noise
 
         cam_t_map, dpi_dx_at_mu, predicted_observations = self.points_to_observations(mu_m)
 
         m_times_dpi_dx_at_mu = self.camera.M @ dpi_dx_at_mu.transpose([2, 0, 1])
-        h_t = -m_times_dpi_dx_at_mu @ self.camera.pose @ \
-              o_dot(homo_mul(inv_pose(self.imu.pose), mu_m)).transpose([2, 0, 1])
+        h_t = -m_times_dpi_dx_at_mu @ self.camera.pose @ o_dot(homo_mul(inv_pose(self.imu.pose), mu_m)).transpose(
+            [2, 0, 1])
         h_m = (m_times_dpi_dx_at_mu @ cam_t_map)[..., :3]
 
-        Hm = sparse.bsr_matrix((h_m, update_indices, np.arange(len(update_indices) + 1)),
-                                    blocksize=(4, 3),
-                                    shape=(4 * len(update_indices), 3 * len(self.map)))
-        self._validate_sparse_construction(Hm, h_m, update_indices)  # todo: remove when finished debugging
+        Hm_bsr = sparse.bsr_matrix((h_m, update_indices, np.arange(len(update_indices) + 1)),
+                                   blocksize=(4, 3),
+                                   shape=(4 * len(update_indices), 3 * len(self.map)))
+        Ht = h_t.reshape((h_t.shape[0] * h_t.shape[1], h_t.shape[2]))
 
-        k_m = bsr_kalman_gain(self.map.cv, Hm, noise_mat_m)
-        # k_t = kalman_gain(cv_t, h_t, noise_mat_m)
-
-        # k_t = k_t.transpose([1, 2, 0]).reshape(6, -1)  # 6 x 4Nt
-        # h_t = h_t.reshape(-1, 6)  # 4Nt x 6
+        Km = kalman_gain(self.map.cv, Hm_bsr, bsr_noise)
+        Kt = kalman_gain(self.imu.cv, Ht, bsr_noise.toarray())
 
         innovation = (observations - predicted_observations)
         # assert np.all(np.linalg.norm(innovation, axis=0) < 10), \
         #     f"Innovation is very large {np.linalg.norm(innovation, axis=0)}"
         self._update_innovation_record(innovation, update_indices)
 
-        self.map.update_points(update_indices, innovation, k_m)
-        self.map.update_cv(k_m, Hm)
+        self.map.update_points(update_indices, innovation, Km)
+        self.map.update_cv(Km, Hm_bsr)
 
-        # self.imu.update_pose(k_t @ innovation.flatten())
-        # self.imu.cv = (np.eye(6) - k_t @ h_t) @ self.imu.cv
+        self.imu.update_pose(Kt @ innovation.flatten())
+        self.imu.cv = (np.eye(6) - Kt @ Ht) @ self.imu.cv
         return
 
-    def _validate_sparse_construction(self, Hm, h_m, update_indices):
+    @staticmethod
+    def _validate_sparse_construction(Hm, h_m, update_indices):
         Hm = Hm.toarray()
         rand_idx = np.random.randint(0, len(h_m))
         h_m_slice = h_m[rand_idx]
