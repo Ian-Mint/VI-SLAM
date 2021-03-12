@@ -50,6 +50,10 @@ class Imu:
 
         self.trail[:, idx] = self.xy_coords
 
+    @property
+    def coords(self):
+        return self.pose[:3, 3]
+
     def update_pose(self, twist: np.ndarray):
         """
         Apply hat map and matrix exponential to twist, then matmul with the original pose
@@ -142,6 +146,7 @@ class Camera:
         for t in range(features.shape[-1]):
             zt = features[..., t]
             indices = np.argwhere(zt[0] != -1).squeeze()
+
             disparity = zt[0, indices] - zt[2, indices]
             depth = self._fsu * self._b / disparity
             indices = indices[np.logical_and(depth > self.min_depth, depth < self.max_depth)]
@@ -169,7 +174,8 @@ class Camera:
 
 
 class Map:
-    def __init__(self, n_points: int):
+    def __init__(self, n_points: int, max_update: float):
+        self.max_update = max_update
         self.cv = self._get_cv(n_points)
         self.points = np.zeros((3, n_points))
         self.points[:] = np.nan
@@ -189,13 +195,20 @@ class Map:
     def __len__(self):
         return self.points.shape[1]
 
-    def update_points(self, indices, innovation, k):
+    def update_points(self, indices, innovation, k, validate=True):
         self._update_count[indices] += 1
         innovation = innovation.T.flatten()
         update = (k @ innovation).reshape((len(self), 3)).T
+
+        if validate:
+            update_norm = np.linalg.norm(update[:, indices] - self.points[:, indices], ord=2, axis=0)
+            valid = update_norm < self.max_update
+            indices = indices[valid]
+
         self.points[:, indices] += update[:, indices]
 
     def update_cv(self, k: np.ndarray, h: sparse.bsr_matrix):
+        # todo: look into validating cv
         k_bsr = sparse.bsr_matrix(k)
         update = (sparse.eye(len(self) * 3) - k_bsr @ h) @ self.cv
         self.cv = update
@@ -206,16 +219,18 @@ class Runner:
     A runner class that processes sensor inputs and appropriately updates the car and map objects.
     """
 
-    def __init__(self, camera: Camera, imu: Imu, map_: Map, n_samples: int, plot_interval=1):
+    def __init__(self, camera: Camera, imu: Imu, map_: Map, n_samples: int, distance_threshold=30, plot_interval=1):
         """
         Args:
             n_samples: number of time steps
             camera: Camera object
             imu: Imu object
             map_: Map object
+            distance_threshold: If the map point is farther away than this, don't try to update it
             plot_interval: Interval at which to update the map plot
         """
 
+        self.d_thresh = distance_threshold
         self.plot_interval = plot_interval
         self.n_samples = n_samples
 
@@ -246,16 +261,26 @@ class Runner:
         # map update
         time_delta, (indices, observations) = self.camera[idx]
 
+        close_enough = np.argwhere(
+            np.logical_or(
+                np.linalg.norm(self.map.points[:, indices] - self.imu.coords[:, None], ord=2, axis=0) < self.d_thresh,
+                np.isnan(self.map.points[0, indices]),
+            )).squeeze()
+        indices = indices[close_enough]
+        observations = observations[..., close_enough]
         mu_m = self.map.points[:, indices]
 
         new_points = np.argwhere(np.isnan(mu_m[0])).squeeze()
         update_points = np.argwhere(np.logical_not(np.isnan(mu_m[0]))).squeeze()
-        self._initialize_map_points(indices[new_points], observations[..., new_points])
+        if new_points.size > 0:
+            self._initialize_map_points(indices[new_points], observations[..., new_points])
+        if update_points.size > 0:
+            update_indices = indices[update_points]
+            observations = observations[..., update_points]
+            mu_m = mu_m[:, update_points]
+        else:
+            return
 
-        update_indices = indices[update_points]
-        observations = observations[..., update_points]
-        mu_m = self.map.points[:, update_indices]
-        cv_t = self.imu.cv
         if isinstance(update_indices, np.int64):
             update_indices = np.array([update_indices])
             noise_m = self.camera.noise.rvs()

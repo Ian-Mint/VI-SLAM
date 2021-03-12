@@ -44,13 +44,13 @@ def load_data(file_name, load_features=False):
 
 
 def visualize_trajectory_2d(pose, path_name="Unknown", show_ori=False):
-    '''
+    """
     function to visualize the trajectory in 2D
     Input:
-        pose:   4*4*N matrix representing the camera pose, 
+        pose:   4*4*N matrix representing the camera pose,
                 where N is the number of pose, and each
                 4*4 matrix is in SE(3)
-    '''
+    """
     fig, ax = plt.subplots(figsize=(5, 5))
     n_pose = pose.shape[2]
     ax.plot(pose[0, 3, :], pose[1, 3, :], 'r-', label=path_name)
