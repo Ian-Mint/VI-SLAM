@@ -4,6 +4,7 @@ from typing import Tuple, List
 import matplotlib.pyplot as plt
 import numpy as np
 import scipy.stats
+import scipy.sparse as sparse
 
 from functions import *
 
@@ -168,23 +169,35 @@ class Camera:
 
 class Map:
     def __init__(self, n_points: int):
+        self.cv = self._get_cv(n_points)
+        self.points = np.zeros((3, n_points))
+        self.points[:] = np.nan
+
+        self._update_count = np.zeros(n_points)
+
+    @staticmethod
+    def _get_cv(n_points):
         prior_covariance = 0.1
         prior_variance = 0.5
-        self.cv = np.zeros((3, 3, n_points)) + prior_covariance + np.diag([prior_variance] * 3)[..., None]
-        self._zero_z_var()
-        self.points = np.zeros((3, n_points))
-        self.points[:2] = np.nan
+        cv_blocks = np.zeros((n_points, 3, 3)) + prior_covariance + np.diag([prior_variance] * 3)[None, ...]
+        cv = sparse.bsr_matrix((cv_blocks, np.arange(n_points), np.arange(n_points + 1)),
+                               blocksize=(3, 3),
+                               shape=(3 * n_points, 3 * n_points))
+        return cv
 
-    def _zero_z_var(self):
-        self.cv[:2, 2] = 0.
-        self.cv[2, :2] = 0.
+    def __len__(self):
+        return self.points.shape[1]
 
-    def update_points(self, indices, update):
-        self.points[:2, indices] = update[:2]
+    def update_points(self, indices, innovation, k):
+        self._update_count[indices] += 1
+        innovation = innovation.T.flatten()
+        update = (k @ innovation).reshape((len(self), 3)).T
+        self.points[:, indices] += update[:, indices]
 
-    def update_cv(self, indices, update):
-        self.cv[..., indices] = update
-        self._zero_z_var()
+    def update_cv(self, k: np.ndarray, h: sparse.bsr_matrix):
+        k_bsr = sparse.bsr_matrix(k)
+        update = (sparse.eye(len(self) * 3) - k_bsr @ h) @ self.cv
+        self.cv = update
 
 
 class Runner:
@@ -212,6 +225,9 @@ class Runner:
         self._plot_number = 0
         self.plot = self.plot
 
+        # for debugging
+        self._innovation_record = np.zeros((4, len(map_)))
+
     def run(self):
         print("Run starting")
         report_iterations = int(1e5)
@@ -237,44 +253,58 @@ class Runner:
 
         update_indices = indices[update_points]
         observations = observations[..., update_points]
-        mu_m = mu_m[:, update_points]
-        cv_m = self.map.cv[..., update_indices]
+        mu_m = self.map.points[:, update_indices]
         cv_t = self.imu.cv
         if isinstance(update_indices, np.int64):
             noise_m = self.camera.noise.rvs()
-            observations, mu_m, cv_m, noise_m = expand_dim([observations, mu_m, cv_m, noise_m], -1)
+            observations, mu_m, noise_m = expand_dim([observations, mu_m, noise_m], -1)
         elif len(update_indices) > 1:
             noise_m = self.camera.noise.rvs(len(update_points)).T
         else:
             return  # we got no observations
-        noise_mat_m = vector_to_diag(noise_m)  # diagonalize and broadcast the noise
+        noise_mat_m = vector_to_bsr(noise_m)  # diagonalize and broadcast the noise
 
         cam_t_map, dpi_dx_at_mu, predicted_observations = self.points_to_observations(mu_m)
 
         m_times_dpi_dx_at_mu = self.camera.M @ dpi_dx_at_mu.transpose([2, 0, 1])
         h_t = -m_times_dpi_dx_at_mu @ self.camera.pose @ \
-            o_dot(homo_mul(inv_pose(self.imu.pose), mu_m)).transpose([2, 0, 1])
+              o_dot(homo_mul(inv_pose(self.imu.pose), mu_m)).transpose([2, 0, 1])
         h_m = (m_times_dpi_dx_at_mu @ cam_t_map)[..., :3]
 
-        k_m = kalman_gain(cv_m, h_m, noise_mat_m)
-        k_t = kalman_gain(cv_t, h_t, noise_mat_m)
+        Hm = sparse.bsr_matrix((h_m, update_indices, np.arange(len(update_indices) + 1)),
+                                    blocksize=(4, 3),
+                                    shape=(4 * len(update_indices), 3 * len(self.map)))
+        self._validate_sparse_construction(Hm, h_m, update_indices)  # todo: remove when finished debugging
 
-        k_t = k_t.transpose([1, 2, 0]).reshape(6, -1)  # 6 x 4Nt
-        h_t = h_t.reshape(-1, 6)  # 4Nt x 6
+        k_m = bsr_kalman_gain(self.map.cv, Hm, noise_mat_m)
+        # k_t = kalman_gain(cv_t, h_t, noise_mat_m)
+
+        # k_t = k_t.transpose([1, 2, 0]).reshape(6, -1)  # 6 x 4Nt
+        # h_t = h_t.reshape(-1, 6)  # 4Nt x 6
 
         innovation = (observations - predicted_observations)
         # assert np.all(np.linalg.norm(innovation, axis=0) < 10), \
         #     f"Innovation is very large {np.linalg.norm(innovation, axis=0)}"
+        self._update_innovation_record(innovation, update_indices)
 
-        self.map.update_points(update_indices, mu_m.squeeze() + (k_m @ innovation.T[..., None]).squeeze().T)
-        self.map.update_cv(
-            update_indices,
-            ((np.eye(3)[None, ...] - k_m @ h_m) @ cv_m.transpose([2, 0, 1])).transpose([1, 2, 0]).squeeze()
-        )
+        self.map.update_points(update_indices, innovation, k_m)
+        self.map.update_cv(k_m, Hm)
 
-        self.imu.update_pose(k_t @ innovation.flatten())
-        self.imu.cv = (np.eye(6) - k_t @ h_t) @ self.imu.cv
+        # self.imu.update_pose(k_t @ innovation.flatten())
+        # self.imu.cv = (np.eye(6) - k_t @ h_t) @ self.imu.cv
         return
+
+    def _validate_sparse_construction(self, Hm, h_m, update_indices):
+        Hm = Hm.toarray()
+        rand_idx = np.random.randint(0, len(h_m))
+        h_m_slice = h_m[rand_idx]
+        Hm_slice = Hm[rand_idx * 4: (rand_idx + 1) * 4,
+                   update_indices[rand_idx] * 3: (update_indices[rand_idx] + 1) * 3]
+        assert np.all(h_m_slice == Hm_slice)
+
+    def _update_innovation_record(self, innovation, update_indices):
+        innovation = innovation.squeeze()
+        self._innovation_record[:, update_indices] = innovation
 
     def points_to_observations(self, mu):
         cam_t_map = self.camera.pose @ inv_pose(self.imu.pose)  # pose converting from world to camera
@@ -293,11 +323,10 @@ class Runner:
         Returns:
 
         """
-        map_frame = self.observation_to_world(observations)
-        self.map.update_points(indices, map_frame)
+        map_frame = self.observation_to_points(observations)
         self.map.points[:, indices] = map_frame
 
-    def observation_to_world(self, observations):
+    def observation_to_points(self, observations):
         """
         Converts valid stereo image observations to xyz points in the world
 
@@ -311,7 +340,7 @@ class Runner:
         map_frame = homo_mul(self.imu.pose @ inv_pose(self.camera.pose), camera_frame)[:3]
         return map_frame
 
-    def plot(self):
+    def plot(self, blocking=True):
         fig, ax = plt.subplots()
         ax.scatter(self.map.points[0], self.map.points[1], s=1, label='landmarks')
         ax.scatter(self.imu.trail[0], self.imu.trail[1], s=1, label='path')
@@ -319,4 +348,4 @@ class Runner:
         ax.set_xlabel("x distance from start (m)")
         ax.set_ylabel("y distance from start (m)")
         plt.legend()
-        plt.show()
+        plt.show(block=blocking)

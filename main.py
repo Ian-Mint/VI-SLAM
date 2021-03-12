@@ -35,7 +35,19 @@ if __name__ == '__main__':
     runner.run()
     print(f'complete in {time.time() - start:02f} seconds')
 
+    runner.plot(blocking=True)
+
+    # debugging
     from functions import *
     print(pose_to_axis(runner.imu.pose))
     print(pose_to_angle(runner.imu.pose))
-    runner.plot()
+    print(runner.imu.pose[:3, -1])
+
+    bad_points = np.argwhere(np.logical_or.reduce([
+        runner.map.points[0] > 250,
+        runner.map.points[0] < -1050,
+        runner.map.points[1] > 150,
+        runner.map.points[1] < -450,
+    ]))
+
+    exit()

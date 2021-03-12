@@ -2,6 +2,7 @@ import unittest
 
 import numpy as np
 
+from sensors import *
 from functions import hat, vee, adj_hat, expm, inv_pose, d_pi_dx, pi
 
 
@@ -72,6 +73,51 @@ class TestMath(unittest.TestCase):
         estimated_d4 = estimate_grad(dq, dq4, q)
         d4 = result[:, 3]
         self.assertTrue(np.allclose(estimated_d4, d4))
+
+
+class TestRunner(unittest.TestCase):
+    def setUp(self) -> None:
+        with np.load('data/features.npz') as data:
+            k = data['K']
+            b = data['b']
+            features = data.get('features', None)  # for when we make our own features
+            linear_velocity = data['linear_velocity']
+            angular_velocity = data['angular_velocity']
+            imu_T_cam = data['imu_T_cam']
+            timestamps = data['time_stamps']
+
+        time_steps = np.diff(timestamps).squeeze()
+        linear_velocity = linear_velocity[:, :-1]
+        angular_velocity = angular_velocity[:, :-1]
+        features = features[:, :-1]
+        n_points = features.shape[1]
+        n_samples = len(time_steps)
+
+        accel_var = 1e-4
+        gyro_var = 1e-6
+        imu_variance = np.array([accel_var, accel_var, accel_var, gyro_var, gyro_var, gyro_var])
+        self.runner = Runner(Camera(features, time_steps, k, b, imu_T_cam, depth_threshold=50),
+                             Imu(linear_velocity, angular_velocity, time_steps, imu_variance),
+                             Map(n_points),
+                             n_samples, plot_interval=5000)
+
+    @unittest.skip
+    def test_points_to_observations_is_inverse_of_observations_to_points(self):
+        # note that this is likely to produce impossible observations
+        observation = np.random.random((4, 100)) * 100
+        points_from_obs = self.runner.observation_to_points(observation)
+        _, _, obs_again = self.runner.points_to_observations(points_from_obs)
+
+        self.assertTrue(np.allclose(observation, obs_again))
+
+    def test_observations_to_points_is_inverse_of_points_to_observations(self):
+        points = np.random.random((3, 100)) * 1000
+        _, _, obs_from_points = self.runner.points_to_observations(points)
+        points_again = self.runner.observation_to_points(obs_from_points)
+        _, _, obs_from_points_again = self.runner.points_to_observations(points_again)
+
+        self.assertTrue(np.allclose(points, points_again))
+        self.assertTrue(np.allclose(obs_from_points, obs_from_points_again))
 
 
 if __name__ == '__main__':
