@@ -171,20 +171,14 @@ class Map:
         prior_covariance = 0.1
         prior_variance = 0.5
         self.cv = np.zeros((3, 3, n_points)) + prior_covariance + np.diag([prior_variance] * 3)[..., None]
-        self._zero_z_var()
         self.points = np.zeros((3, n_points))
-        self.points[:2] = np.nan
-
-    def _zero_z_var(self):
-        self.cv[:2, 2] = 0.
-        self.cv[2, :2] = 0.
+        self.points[...] = np.nan
 
     def update_points(self, indices, update):
-        self.points[:2, indices] = update[:2]
+        self.points[:, indices] = update
 
     def update_cv(self, indices, update):
         self.cv[..., indices] = update
-        self._zero_z_var()
 
 
 class Runner:
