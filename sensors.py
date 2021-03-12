@@ -252,13 +252,17 @@ class Runner:
         cam_t_map, dpi_dx_at_mu, predicted_observations = self.points_to_observations(mu_m)
 
         m_times_dpi_dx_at_mu = self.camera.M @ dpi_dx_at_mu.transpose([2, 0, 1])
-        h_t = -m_times_dpi_dx_at_mu @ self.camera.pose @ o_dot(homo_mul(inv_pose(self.imu.pose), mu_m))
+        h_t = -m_times_dpi_dx_at_mu @ self.camera.pose @ \
+            o_dot(homo_mul(inv_pose(self.imu.pose), mu_m)).transpose([2, 0, 1])
         h_m = (m_times_dpi_dx_at_mu @ cam_t_map)[..., :3]
 
         k_m = kalman_gain(cv_m, h_m, noise_mat_m)
         k_t = kalman_gain(cv_t, h_t, noise_mat_m)
 
-        innovation = observations - predicted_observations
+        k_t = k_t.transpose([1, 2, 0]).reshape(6, -1)  # 6 x 4Nt
+        h_t = h_t.reshape(-1, 6)  # 4Nt x 6
+
+        innovation = (observations - predicted_observations)
         # assert np.all(np.linalg.norm(innovation, axis=0) < 10), \
         #     f"Innovation is very large {np.linalg.norm(innovation, axis=0)}"
 
@@ -268,8 +272,8 @@ class Runner:
             ((np.eye(3)[None, ...] - k_m @ h_m) @ cv_m.transpose([2, 0, 1])).transpose([1, 2, 0]).squeeze()
         )
 
-        self.imu.update_pose(k_t @ innovation)
-        self.imu.cv = (np.eye(4) - k_t @ h_t) @ self.imu.cv
+        self.imu.update_pose(k_t @ innovation.flatten())
+        self.imu.cv = (np.eye(6) - k_t @ h_t) @ self.imu.cv
         return
 
     def points_to_observations(self, mu):

@@ -13,9 +13,10 @@ logm = scipy.linalg.logm
 
 
 def o_dot(x):
-    out = np.zeros((4, 6))
-    out[:3, :3] = np.eye(3)
-    out[:3, 3:] = -hat(x)
+    out = np.zeros((4, 6, *x.shape[1:]))
+    out[:3, :3] = np.eye(3)[..., None]
+    _hat_map(-x, out[:3, 3:])
+    return out
 
 
 def pose_to_angle(pose):
@@ -247,7 +248,9 @@ def vector_to_diag(noise):
 
 
 def kalman_gain(cv, h, noise):
-    cv_times_h_transpose = cv.transpose([2, 0, 1]) @ h.transpose([0, 2, 1])
+    if cv.ndim > 2:
+        cv = cv.transpose([2, 0, 1])
+    cv_times_h_transpose = cv @ h.transpose([0, 2, 1])
     a = (h @ cv_times_h_transpose + noise).transpose([0, 2, 1])
     b = cv_times_h_transpose.transpose([0, 2, 1])
     kt = lstsq_broadcast(a, b)
