@@ -83,7 +83,7 @@ class Imu:
 
 class Camera:
     def __init__(self, features: np.ndarray, time_steps: np.ndarray, calibration: np.ndarray, base: np.ndarray,
-                 pose: np.ndarray, depth_threshold=100, downsample_by=10):
+                 pose: np.ndarray, depth_threshold=100):
         """
 
         Args:
@@ -100,7 +100,6 @@ class Camera:
         self.inv_pose = pose
         self.pose = inv_pose(pose)
 
-        features = features[..., ::downsample_by, :]
         self._data = self._pre_process(features)
         self._time = time_steps.squeeze()
 
@@ -258,10 +257,11 @@ class Runner:
         mu_m = self.map.points[:, update_indices]
         cv_t = self.imu.cv
         if isinstance(update_indices, np.int64):
+            update_indices = np.array([update_indices])
             noise_m = self.camera.noise.rvs()
             observations, mu_m, noise_m = expand_dim([observations, mu_m, noise_m], -1)
         elif len(update_indices) > 1:
-            noise_m = self.camera.noise.rvs(len(update_points)).T
+            noise_m = self.camera.noise.rvs(len(update_indices)).T
         else:
             return  # we got no observations
         noise_mat_m = vector_to_bsr(noise_m)  # diagonalize and broadcast the noise
@@ -305,7 +305,6 @@ class Runner:
         assert np.all(h_m_slice == Hm_slice)
 
     def _update_innovation_record(self, innovation, update_indices):
-        innovation = innovation.squeeze()
         self._innovation_record[:, update_indices] = innovation
 
     def points_to_observations(self, mu):
