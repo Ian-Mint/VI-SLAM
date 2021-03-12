@@ -7,6 +7,7 @@ import scipy.stats
 import scipy.sparse as sparse
 
 from functions import *
+from utils import visualize_trajectory_2d
 
 __all__ = ['Camera', 'Imu', 'Map', 'Runner']
 
@@ -32,6 +33,7 @@ class Imu:
         self.pose = expm(np.zeros((4, 4)))
         self.cv = np.eye(6) * 0.25
 
+        self.pose_trail = np.zeros((4, 4, len(self._time)))
         self.trail = np.zeros((2, len(self._time)))
         self.noise = self._get_noise()
 
@@ -48,11 +50,8 @@ class Imu:
         s = expm(-time_delta * adj_hat(twist_rate))
         self.cv = s @ self.cv @ s.T + noise
 
+        self.pose_trail[:, :, idx] = self.pose
         self.trail[:, idx] = self.xy_coords
-
-    @property
-    def coords(self):
-        return self.pose[:3, 3]
 
     def update_pose(self, twist: np.ndarray):
         """
@@ -62,6 +61,10 @@ class Imu:
             twist: 6-long numpy array
         """
         self.pose = self.pose @ expm(hat(twist))
+
+    @property
+    def coords(self):
+        return self.pose[:3, 3]
 
     @property
     def xy_coords(self):
@@ -251,6 +254,8 @@ class Runner:
         start = time.time()
         for i in range(self.n_samples):
             self._step(i)
+            # if i % 100 == 0:
+            #     visualize_trajectory_2d(self.imu.pose_trail[..., :i + 1])
             if (i + 1) % report_iterations == 0:
                 print(f'Sample {(i + 1) // 1000} thousand in {time.time() - start: 02f}s')
                 start = time.time()
@@ -314,7 +319,7 @@ class Runner:
         self.map.update_points(update_indices, innovation, Km)
         self.map.update_cv(Km, Hm_bsr)
 
-        self.imu.update_pose(Kt @ innovation.flatten())
+        self.imu.update_pose(Kt @ innovation.T.flatten())
         self.imu.cv = (np.eye(6) - Kt @ Ht) @ self.imu.cv
         return
 
