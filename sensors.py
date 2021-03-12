@@ -44,10 +44,15 @@ class Imu:
         noise = self.noise.rvs()
 
         self.pose = self.pose @ expm(time_delta * hat(twist_rate))
+        self.pose[3, 3] = 0.
         s = expm(-time_delta * adj_hat(twist_rate))
         self.cv = s @ self.cv @ s.T + noise
 
         self.trail[:, idx] = self.xy_coords
+
+    @property
+    def coords(self):
+        return self.pose[:3, 3]
 
     @property
     def xy_coords(self):
@@ -131,6 +136,7 @@ class Camera:
         for t in range(features.shape[-1]):
             zt = features[..., t]
             indices = np.argwhere(zt[0] != -1).squeeze()
+
             disparity = zt[0, indices] - zt[2, indices]
             depth = self._fsu * self._b / disparity
             indices = indices[np.logical_and(depth > self.min_depth, depth < self.max_depth)]
@@ -158,24 +164,25 @@ class Camera:
 
 
 class Map:
-    def __init__(self, n_points: int):
+    def __init__(self, n_points: int, max_update: float):
+        self.max_update = max_update
         prior_covariance = 0.1
         prior_variance = 0.5
         self.cv = np.zeros((3, 3, n_points)) + prior_covariance + np.diag([prior_variance] * 3)[..., None]
-        self._zero_z_var()
         self.points = np.zeros((3, n_points))
-        self.points[:2] = np.nan
+        self.points[:] = np.nan
 
-    def _zero_z_var(self):
-        self.cv[:2, 2] = 0.
-        self.cv[2, :2] = 0.
+    def update_points(self, indices, update, validate=True):
+        if validate:
+            update_norm = np.linalg.norm(update - self.points[:, indices], ord=2, axis=0)
+            valid = update_norm < self.max_update
+            indices = indices[valid]
+            update = update[:, valid]
 
-    def update_points(self, indices, update):
-        self.points[:2, indices] = update[:2]
+        self.points[:, indices] = update[:]
 
     def update_cv(self, indices, update):
         self.cv[..., indices] = update
-        self._zero_z_var()
 
 
 class Runner:
@@ -183,16 +190,18 @@ class Runner:
     A runner class that processes sensor inputs and appropriately updates the car and map objects.
     """
 
-    def __init__(self, camera: Camera, imu: Imu, map_: Map, n_samples: int, plot_interval=1):
+    def __init__(self, camera: Camera, imu: Imu, map_: Map, n_samples: int, distance_threshold=30, plot_interval=1):
         """
         Args:
             n_samples: number of time steps
             camera: Camera object
             imu: Imu object
             map_: Map object
+            distance_threshold: If the map point is farther away than this, don't try to update it
             plot_interval: Interval at which to update the map plot
         """
 
+        self.d_thresh = distance_threshold
         self.plot_interval = plot_interval
         self.n_samples = n_samples
 
@@ -220,16 +229,27 @@ class Runner:
         # map update
         time_delta, (indices, observations) = self.camera[idx]
 
+        close_enough = np.argwhere(
+            np.logical_or(
+                np.linalg.norm(self.map.points[:, indices] - self.imu.coords[:, None], ord=2, axis=0) < self.d_thresh,
+                np.isnan(self.map.points[0, indices]),
+            )).squeeze()
+        indices = indices[close_enough]
+        observations = observations[..., close_enough]
         mu = self.map.points[:, indices]
 
         new_points = np.argwhere(np.isnan(mu[0])).squeeze()
         update_points = np.argwhere(np.logical_not(np.isnan(mu[0]))).squeeze()
-        self._initialize_map_points(indices[new_points], observations[..., new_points])
+        if new_points.size > 0:
+            self._initialize_map_points(indices[new_points], observations[..., new_points])
+        if update_points.size > 0:
+            update_indices = indices[update_points]
+            observations = observations[..., update_points]
+            mu = mu[:, update_points]
+            cv = self.map.cv[..., update_indices]
+        else:
+            return
 
-        update_indices = indices[update_points]
-        observations = observations[..., update_points]
-        mu = mu[:, update_points]
-        cv = self.map.cv[..., update_indices]
         if isinstance(update_indices, np.int64):
             noise = self.camera.noise.rvs()
             observations, mu, cv, noise = expand_dim([observations, mu, cv, noise], -1)
@@ -277,7 +297,7 @@ class Runner:
 
         """
         map_frame = self.observation_to_world(observations)
-        self.map.update_points(indices, map_frame)
+        self.map.update_points(indices, map_frame, validate=False)
         self.map.points[:, indices] = map_frame
 
     def observation_to_world(self, observations):
