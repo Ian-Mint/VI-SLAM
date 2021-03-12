@@ -82,7 +82,7 @@ class Imu:
 
 class Camera:
     def __init__(self, features: np.ndarray, time_steps: np.ndarray, calibration: np.ndarray, base: np.ndarray,
-                 pose: np.ndarray, depth_threshold=100):
+                 pose: np.ndarray, depth_threshold=100, downsample_by=10):
         """
 
         Args:
@@ -98,6 +98,8 @@ class Camera:
         self.max_depth = depth_threshold
         self.inv_pose = pose
         self.pose = inv_pose(pose)
+
+        features = features[..., ::downsample_by, :]
         self._data = self._pre_process(features)
         self._time = time_steps.squeeze()
 
@@ -247,7 +249,7 @@ class Runner:
 
         m_times_dpi_dx_at_mu = self.camera.M @ dpi_dx_at_mu.transpose([2, 0, 1])
         h_t = -m_times_dpi_dx_at_mu @ self.camera.pose @ \
-            o_dot(homo_mul(inv_pose(self.imu.pose), mu_m)).transpose([2, 0, 1])
+              o_dot(homo_mul(inv_pose(self.imu.pose), mu_m)).transpose([2, 0, 1])
         h_m = (m_times_dpi_dx_at_mu @ cam_t_map)[..., :3]
 
         k_m = kalman_gain(cv_m, h_m, noise_mat_m)
@@ -266,8 +268,8 @@ class Runner:
             ((np.eye(3)[None, ...] - k_m @ h_m) @ cv_m.transpose([2, 0, 1])).transpose([1, 2, 0]).squeeze()
         )
 
-        self.imu.update_pose(k_t @ innovation.flatten())
-        self.imu.cv = (np.eye(6) - k_t @ h_t) @ self.imu.cv
+        # self.imu.update_pose(k_t @ innovation.flatten())
+        # self.imu.cv = (np.eye(6) - k_t @ h_t) @ self.imu.cv
         return
 
     def points_to_observations(self, mu):
