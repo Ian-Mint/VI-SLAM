@@ -83,7 +83,7 @@ class Imu:
 
 class Camera:
     def __init__(self, features: np.ndarray, time_steps: np.ndarray, calibration: np.ndarray, base: np.ndarray,
-                 pose: np.ndarray, depth_threshold=100):
+                 pose: np.ndarray, depth_threshold=100, downsample_by=10):
         """
 
         Args:
@@ -99,6 +99,8 @@ class Camera:
         self.max_depth = depth_threshold
         self.inv_pose = pose
         self.pose = inv_pose(pose)
+
+        features = features[..., ::downsample_by, :]
         self._data = self._pre_process(features)
         self._time = time_steps.squeeze()
 
