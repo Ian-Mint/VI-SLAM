@@ -114,8 +114,8 @@ class Camera:
         self.noise = self._get_noise()
 
     def _get_noise(self):
-        covariance = 0.5
-        variance = 3  # 4-5 recommended
+        covariance = 0.1
+        variance = 4  # 4-5 recommended
         dim = 4
         self.measurement_cv = np.zeros((dim, dim)) + covariance + np.diag([variance] * dim)
         return scipy.stats.multivariate_normal(cov=self.measurement_cv)
@@ -314,8 +314,8 @@ class Runner:
         #     f"Innovation is very large {np.linalg.norm(innovation, axis=0)}"
         self._update_innovation_record(innovation, update_indices)
 
-        # self.map.update_points(update_indices, innovation, Km)
-        # self.map.update_cv(Km, Hm_bsr)
+        self.map.update_points(update_indices, innovation, Km)
+        self.map.update_cv(Km, Hm_bsr)
 
         self.imu.update_pose(Kt @ innovation.T.flatten())
         self.imu.cv = (np.eye(6) - Kt @ Ht) @ self.imu.cv

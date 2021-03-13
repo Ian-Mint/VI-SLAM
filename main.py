@@ -27,9 +27,9 @@ if __name__ == '__main__':
     n_samples = len(time_steps)
 
     # todo: move on to full slam
-    accel_var = 1e-4
-    gyro_var = 1e-6
-    imu_variance = np.array([accel_var, accel_var, accel_var, gyro_var, gyro_var, gyro_var])
+    velocity_var = 1e-2
+    omega_var = 1e-4
+    imu_variance = np.array([velocity_var, velocity_var, velocity_var, omega_var, omega_var, omega_var])
     runner = Runner(Camera(features, time_steps, k, b, imu_T_cam, depth_threshold=200),
                     Imu(linear_velocity, angular_velocity, time_steps, imu_variance),
                     Map(n_points, max_update=10), n_samples,
