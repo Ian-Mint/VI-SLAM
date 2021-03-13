@@ -7,6 +7,7 @@ import scipy.stats
 import scipy.sparse as sparse
 
 from functions import *
+from functions import expm, adj_hat
 from utils import visualize_trajectory_2d
 
 __all__ = ['Camera', 'Imu', 'Map', 'Runner']
@@ -100,7 +101,7 @@ class Camera:
             calibration:
             base:
             pose:
-            depth_threshold:
+            depth_threshold: ignore observations beyond this depth
         """
         self.M = self._get_stereo_calibration(calibration, base)
         self.min_depth = 0.5
@@ -193,7 +194,7 @@ class Map:
         cv = sparse.bsr_matrix((cv_blocks, np.arange(n_points), np.arange(n_points + 1)),
                                blocksize=(3, 3),
                                shape=(3 * n_points, 3 * n_points))
-        return cv
+        return cv.tocsc()
 
     def __len__(self):
         return self.points.shape[1]
@@ -241,11 +242,20 @@ class Runner:
         self.imu = imu
         self.map = map_
 
+        self.cv = self._get_cv()
+
         self._plot_number = 0
         self.plot = self.plot
 
         # for debugging
         self._innovation_record = np.zeros((4, len(map_)))
+
+    def _get_cv(self) -> sparse.csc_matrix:
+        size = self.map.cv.shape[0] + 6
+        out = sparse.lil_matrix((size, size))
+        out[:6, :6] = self.imu.cv[:]
+        out[6:, 6:] = self.map.cv[:]
+        return out.tocsc()
 
     def run(self):
         print("Run starting")
@@ -261,7 +271,13 @@ class Runner:
                 start = time.time()
 
     def _step(self, idx):
-        self.imu.predict(idx)
+        imu = self.imu
+        delta, twist_rate = imu[idx]
+        imu.update_pose(delta * twist_rate)
+        s = expm(-delta * adj_hat(twist_rate))
+        self.cv[:6, :6] = s @ self.cv[:6, :6] @ s.T + imu.measurement_cv
+        imu.pose_trail[:, :, idx] = imu.pose
+        imu.trail[:, idx] = imu.xy_coords
 
         time_delta, (indices, observations) = self.camera[idx]
 
@@ -305,20 +321,22 @@ class Runner:
                                    blocksize=(4, 3),
                                    shape=(4 * len(update_indices), 3 * len(self.map)))
         Ht = h_t.reshape((h_t.shape[0] * h_t.shape[1], h_t.shape[2]))
+        H = sparse.hstack([sparse.csc_matrix(Ht), Hm_bsr.tocsc()])
 
-        Km = kalman_gain(self.map.cv, Hm_bsr, bsr_noise)
-        Kt = kalman_gain(self.imu.cv, Ht, bsr_noise.toarray())
+        # Km = kalman_gain(self.map.cv, Hm_bsr, bsr_noise)
+        # Kt = kalman_gain(self.imu.cv, Ht, bsr_noise.toarray())
+        K = kalman_gain(self.cv, H, bsr_noise.tocsc())
 
         innovation = (observations - (predicted_observations + noise))
-        # assert np.all(np.linalg.norm(innovation, axis=0) < 10), \
-        #     f"Innovation is very large {np.linalg.norm(innovation, axis=0)}"
         self._update_innovation_record(innovation, update_indices)
 
-        self.map.update_points(update_indices, innovation, Km)
-        self.map.update_cv(Km, Hm_bsr)
+        self.map.update_points(update_indices, innovation, K[6:])
+        # self.map.update_cv(K, H)
 
-        self.imu.update_pose(Kt @ innovation.T.flatten())
-        self.imu.cv = (np.eye(6) - Kt @ Ht) @ self.imu.cv
+        self.imu.update_pose(K[:6] @ innovation.T.flatten())
+        # self.imu.cv = (np.eye(6) - K @ H) @ self.imu.cv
+        self.cv = (sparse.eye(K.shape[0]) - sparse.csc_matrix(K) @ H) @ self.cv
+        print(self.cv.nnz)
         return
 
     def _init_map(self, indices, mu_m, observations):

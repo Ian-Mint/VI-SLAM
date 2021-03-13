@@ -21,7 +21,7 @@ if __name__ == '__main__':
     angular_velocity = angular_velocity[:, :-1]
     features = features[:, :, :-1]
 
-    downsample_by = 2
+    downsample_by = 10
     features = features[..., ::downsample_by, :]
     n_points = features.shape[1]
     n_samples = len(time_steps)

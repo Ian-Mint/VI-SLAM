@@ -266,13 +266,13 @@ def block_to_bsr(x: np.ndarray, replicate):
     return out
 
 
-hint = Union[sparse.bsr_matrix, np.ndarray]
+hint = Union[sparse.bsr_matrix, sparse.csc_matrix, np.ndarray]
 
 
 def kalman_gain(cv: hint, h: hint, noise: hint) -> np.ndarray:
     b = cv @ h.T
     a = h @ b + noise
-    if isinstance(a, sparse.bsr_matrix):
+    if isinstance(a, (sparse.bsr_matrix, sparse.csc_matrix)):
         kt, *_ = scipy.linalg.lstsq(a.T.toarray(), b.T.toarray(), overwrite_a=True, overwrite_b=True)
     else:
         kt, *_ = scipy.linalg.lstsq(a.T, b.T, overwrite_a=True, overwrite_b=True)
