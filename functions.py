@@ -7,7 +7,7 @@ import scipy.sparse as sparse
 
 __all__ = ['expm', 'homogeneous', 'homo_mul', 'inv_pose', 'hat', 'pi', 'd_pi_dx', 'vee', 'img_to_camera_frame',
            'adj_hat', 'lstsq_broadcast', 'coord_to_cell', 'get_coords', 'expand_dim', 'vector_to_diag', 'pose_to_axis',
-           'pose_to_angle', 'o_dot', 'kalman_gain', 'vector_to_bsr', 'kalman_gain']
+           'pose_to_angle', 'o_dot', 'kalman_gain', 'block_to_bsr', 'kalman_gain']
 
 expm = scipy.linalg.expm
 logm = scipy.linalg.logm
@@ -248,18 +248,22 @@ def vector_to_diag(x):
     return np.eye(4) * x.T[..., None]
 
 
-def vector_to_bsr(x: np.ndarray):
+def block_to_bsr(x: np.ndarray, replicate):
     """
     Replaces vector_to_diag when using bsr sparse matrices
 
     Args:
+        replicate: number of times to replicate x along the diagonal of the output
         x: numpy array vector
 
     Returns:
         bsr sparse diagonal array
     """
-    dia = sparse.dia_matrix((x.T.flatten(), [0]), shape=(x.size, x.size))
-    return sparse.bsr_matrix(dia)
+    tiled = np.stack([x] * replicate, axis=0)
+    out = sparse.bsr_matrix((tiled, np.arange(replicate), np.arange(replicate + 1)),
+                            blocksize=(4, 4),
+                            shape=(4 * replicate, 4 * replicate))
+    return out
 
 
 hint = Union[sparse.bsr_matrix, np.ndarray]

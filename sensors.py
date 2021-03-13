@@ -39,16 +39,15 @@ class Imu:
 
     def _get_noise(self):
         dim = 6
-        _measurement_cv = np.zeros((dim, dim)) + self._variance
-        return scipy.stats.multivariate_normal(cov=_measurement_cv)
+        self.measurement_cv = np.zeros((dim, dim)) + self._variance
+        return scipy.stats.multivariate_normal(cov=self.measurement_cv)
 
     def predict(self, idx):
         time_delta, twist_rate = self[idx]
-        noise = self.noise.rvs()
 
         self.update_pose(time_delta * twist_rate)
         s = expm(-time_delta * adj_hat(twist_rate))
-        self.cv = s @ self.cv @ s.T + noise
+        self.cv = s @ self.cv @ s.T + self.measurement_cv
 
         self.pose_trail[:, :, idx] = self.pose
         self.trail[:, idx] = self.xy_coords
@@ -60,7 +59,9 @@ class Imu:
         Args:
             twist: 6-long numpy array
         """
-        self.pose = self.pose @ expm(hat(twist))
+        update = expm(hat(twist))
+        self.pose = self.pose @ update
+        return
 
     @property
     def coords(self):
@@ -112,13 +113,12 @@ class Camera:
 
         self.noise = self._get_noise()
 
-    @staticmethod
-    def _get_noise():
+    def _get_noise(self):
         covariance = 0.5
         variance = 3  # 4-5 recommended
         dim = 4
-        _measurement_cv = np.zeros((dim, dim)) + covariance + np.diag([variance] * dim)
-        return scipy.stats.multivariate_normal(cov=_measurement_cv)
+        self.measurement_cv = np.zeros((dim, dim)) + covariance + np.diag([variance] * dim)
+        return scipy.stats.multivariate_normal(cov=self.measurement_cv)
 
     def img_to_camera_frame(self, observation):
         return img_to_camera_frame(observation, self._fsu, self._fsv, self._cu, self._cv, self._b)
@@ -255,7 +255,7 @@ class Runner:
         for i in range(self.n_samples):
             self._step(i)
             # if i % 100 == 0:
-            #     visualize_trajectory_2d(self.imu.pose_trail[..., :i + 1])
+            # visualize_trajectory_2d(self.imu.pose_trail[..., :i + 1])
             if (i + 1) % report_iterations == 0:
                 print(f'Sample {(i + 1) // 1000} thousand in {time.time() - start: 02f}s')
                 start = time.time()
@@ -263,7 +263,6 @@ class Runner:
     def _step(self, idx):
         self.imu.predict(idx)
 
-        # map update
         time_delta, (indices, observations) = self.camera[idx]
 
         close_enough = np.argwhere(
@@ -273,33 +272,32 @@ class Runner:
             )).squeeze()
         indices = indices[close_enough]
         observations = observations[..., close_enough]
-        mu_m = self.map.points[:, indices]
+        points = self.map.points[:, indices]
 
-        new_points = np.argwhere(np.isnan(mu_m[0])).squeeze()
-        update_points = np.argwhere(np.logical_not(np.isnan(mu_m[0]))).squeeze()
-        if new_points.size > 0:
-            self._initialize_map_points(indices[new_points], observations[..., new_points])
+        self._init_map(indices, points, observations)
+
+        update_points = np.argwhere(np.logical_not(np.isnan(points[0]))).squeeze()
         if update_points.size > 0:
             update_indices = indices[update_points]
             observations = observations[..., update_points]
-            mu_m = mu_m[:, update_points]
+            points = points[:, update_points]
         else:
             return
 
         if isinstance(update_indices, np.int64):
             update_indices = np.array([update_indices])
-            noise_m = self.camera.noise.rvs()
-            observations, mu_m, noise_m = expand_dim([observations, mu_m, noise_m], -1)
+            noise = self.camera.noise.rvs()
+            observations, points, noise = expand_dim([observations, points, noise], -1)
         elif len(update_indices) > 1:
-            noise_m = self.camera.noise.rvs(len(update_indices)).T
+            noise = self.camera.noise.rvs(len(update_indices)).T
         else:
             return  # we got no observations
-        bsr_noise = vector_to_bsr(noise_m)  # diagonalize and broadcast the noise
+        bsr_noise = block_to_bsr(self.camera.measurement_cv, len(update_indices))  # diagonalize and broadcast the noise
 
-        cam_t_map, dpi_dx_at_mu, predicted_observations = self.points_to_observations(mu_m)
+        cam_t_map, dpi_dx_at_mu, predicted_observations = self.points_to_observations(points)
 
         m_times_dpi_dx_at_mu = self.camera.M @ dpi_dx_at_mu.transpose([2, 0, 1])
-        h_t = -m_times_dpi_dx_at_mu @ self.camera.pose @ o_dot(homo_mul(inv_pose(self.imu.pose), mu_m)).transpose(
+        h_t = -m_times_dpi_dx_at_mu @ self.camera.pose @ o_dot(homo_mul(inv_pose(self.imu.pose), points)).transpose(
             [2, 0, 1])
         h_m = (m_times_dpi_dx_at_mu @ cam_t_map)[..., :3]
 
@@ -311,17 +309,22 @@ class Runner:
         Km = kalman_gain(self.map.cv, Hm_bsr, bsr_noise)
         Kt = kalman_gain(self.imu.cv, Ht, bsr_noise.toarray())
 
-        innovation = (observations - predicted_observations)
+        innovation = (observations - (predicted_observations + noise))
         # assert np.all(np.linalg.norm(innovation, axis=0) < 10), \
         #     f"Innovation is very large {np.linalg.norm(innovation, axis=0)}"
         self._update_innovation_record(innovation, update_indices)
 
-        self.map.update_points(update_indices, innovation, Km)
-        self.map.update_cv(Km, Hm_bsr)
+        # self.map.update_points(update_indices, innovation, Km)
+        # self.map.update_cv(Km, Hm_bsr)
 
         self.imu.update_pose(Kt @ innovation.T.flatten())
         self.imu.cv = (np.eye(6) - Kt @ Ht) @ self.imu.cv
         return
+
+    def _init_map(self, indices, mu_m, observations):
+        new_points = np.argwhere(np.isnan(mu_m[0])).squeeze()
+        if new_points.size > 0:
+            self._initialize_map_points(indices[new_points], observations[..., new_points])
 
     @staticmethod
     def _validate_sparse_construction(Hm, h_m, update_indices):

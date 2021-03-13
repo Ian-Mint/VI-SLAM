@@ -21,7 +21,7 @@ if __name__ == '__main__':
     angular_velocity = angular_velocity[:, :-1]
     features = features[:, :, :-1]
 
-    downsample_by = 10
+    downsample_by = 2
     features = features[..., ::downsample_by, :]
     n_points = features.shape[1]
     n_samples = len(time_steps)
@@ -30,10 +30,10 @@ if __name__ == '__main__':
     accel_var = 1e-4
     gyro_var = 1e-6
     imu_variance = np.array([accel_var, accel_var, accel_var, gyro_var, gyro_var, gyro_var])
-    runner = Runner(Camera(features, time_steps, k, b, imu_T_cam, depth_threshold=20),
+    runner = Runner(Camera(features, time_steps, k, b, imu_T_cam, depth_threshold=200),
                     Imu(linear_velocity, angular_velocity, time_steps, imu_variance),
                     Map(n_points, max_update=10), n_samples,
-                    plot_interval=5000, distance_threshold=20)
+                    plot_interval=5000, distance_threshold=200)
     start = time.time()
     runner.run()
     print(f'complete in {time.time() - start:02f} seconds')
