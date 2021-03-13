@@ -259,16 +259,11 @@ class Runner:
 
     def run(self):
         print("Run starting")
-        report_iterations = int(1e5)
-
-        start = time.time()
         for i in range(self.n_samples):
             self._step(i)
-            # if i % 100 == 0:
+            if i % 100 == 0:
+                print(f"step: {i}, density: {self.cv.nnz / np.prod(self.cv.shape)}")
             # visualize_trajectory_2d(self.imu.pose_trail[..., :i + 1])
-            if (i + 1) % report_iterations == 0:
-                print(f'Sample {(i + 1) // 1000} thousand in {time.time() - start: 02f}s')
-                start = time.time()
 
     def _step(self, idx):
         imu = self.imu
@@ -336,7 +331,6 @@ class Runner:
         self.imu.update_pose(K[:6] @ innovation.T.flatten())
         # self.imu.cv = (np.eye(6) - K @ H) @ self.imu.cv
         self.cv = (sparse.eye(K.shape[0]) - sparse.csc_matrix(K) @ H) @ self.cv
-        print(self.cv.nnz)
         return
 
     def _init_map(self, indices, mu_m, observations):
