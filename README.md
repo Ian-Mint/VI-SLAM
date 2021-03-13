@@ -3,32 +3,30 @@
 ```
 .
 ├── data
-│   ├── sensor_data
-│   │   ├── encoder.csv
-│   │   ├── gyro.csv
-│   │   └── lidar.csv
-│   ├── stereo_images
-│   │   ├── stereo_left
-│   │   │   ├── *.png
-│   │   └── stereo_right
-│   │   │   ├── *.png
-│   └── test
-│       ├── encoder.csv
-│       ├── gyro.csv
-│       └── lidar.csv
-└── results
+│   ├── features.npz
+│   ├── images
+│   │   ├── image_00
+│   │   │   ├── data
+│   │   │   │   ├── .png
+│   │   │   └── timestamps.txt
+│   │   └── image_01
+│   │       ├── data
+│   │       │   ├── *.png
+│   │       └── timestamps.txt
+│   └── raw.npz
 ├── environment.yml
+├── functions.py
 ├── main.py
-├── pr2_utils.py
 ├── README.md
 ├── requirements.txt
 ├── sensors.py
-└── test.py
+├── test.py
+└── utils.py
 ```
 
 ## Installation
 
-Required a conda environment for compatibility with `numba`.
+Requires a conda environment for compatibility with `numba`.
 
 set up environment with:
 
