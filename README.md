@@ -1,4 +1,8 @@
-# ECE 276A PR3
+# VI-SLAM
+
+Takes stereo camera images and IMU readings as the input. After extracting features from the images, uses EKF to produce a 3D point cloud map.
+
+## File Structure
 
 ```
 .
