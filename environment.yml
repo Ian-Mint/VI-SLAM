@@ -2,8 +2,11 @@ name: ece276a
 channels:
   - defaults
 dependencies:
-  - python 3.6.*
-  - opencv>=3.4
-  - matplotlib>=2.2
-  - numpy>=1.14
-  - scikit-image>=0.14.0
+  - opencv
+  - matplotlib
+  - numpy
+  - pandas
+  - scipy
+  - scikit-image
+  - numba
+  - transforms3d
